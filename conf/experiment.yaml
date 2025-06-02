@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+
+hydra:
+  job:
+    chdir: false 
+    
+experiment:
+  name: "fish_eval"
+  seed: 42
+  device: "cuda"
+
+mode: "eval"
+
+model:
+  _target_: "models.bioclip.BioCLIPModel"
+  device: "cuda"
+
+data:
+  _target_: "data.loaders.BiologicalDataLoader"
+  base_dir: "./VLM4Bio/datasets"
+  group: "Fish"
+  batch_size: 32
+  num_workers: 4
+
+evaluators:
+  - _target_: "evaluation.evaluator.ZeroShotEvaluator"
+    n_samples: 200
+    metrics: ["accuracy"] 

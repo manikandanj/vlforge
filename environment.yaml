@@ -1,0 +1,23 @@
+name: biocosmos_experiment
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - accelerate
+  - pandas
+  - pillow
+  - python=3.10
+  - pytorch=2.5.1
+  - pytorch-cuda=12.1
+  - torchvision=0.20.1
+  - tqdm
+  - requests
+  - pip
+  - pip:
+    - transformers
+    - datasets
+    - open_clip_torch
+    - hydra-core
+    - omegaconf
