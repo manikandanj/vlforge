@@ -6,7 +6,7 @@ hydra:
     chdir: false 
     
 experiment:
-  name: "fish_eval"
+  name: "butterfly_eval_initial_project_setup"
   seed: 42
   device: "cuda"
 
@@ -15,15 +15,26 @@ mode: "eval"
 model:
   _target_: "models.bioclip.BioCLIPModel"
   device: "cuda"
+  model_name: "hf-hub:imageomics/bioclip"
+
+# Comment other model and uncomment this one to use OpenAI CLIP
+# model:
+#   _target_: "models.openai_clip.OpenAICLIPModel" 
+#   device: "cuda"
+#   model_name: "openai/clip-vit-base-patch32"
+
 
 data:
-  _target_: "data.loaders.BiologicalDataLoader"
-  base_dir: "./VLM4Bio/datasets"
+  _target_: "dataloaders.vlmbio_loader.VLMBioDataLoader"
+  base_dir: "data/VLM4Bio/datasets"
   group: "Fish"
-  batch_size: 32
-  num_workers: 4
+  metadata_file: "metadata_10k.csv"
+  batch_size: 128
 
+#Can add multiple evaluators
 evaluators:
-  - _target_: "evaluation.evaluator.ZeroShotEvaluator"
-    n_samples: 200
-    metrics: ["accuracy"] 
+  - _target_: "evaluation.zero_shot_evaluator.ZeroShotEvaluator"
+    n_samples: 2000
+    metrics: ["accuracy"]
+    show_progress: true
+    

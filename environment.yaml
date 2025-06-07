@@ -1,4 +1,4 @@
-name: biocosmos_experiment
+name: vlforge
 channels:
   - pytorch
   - nvidia
