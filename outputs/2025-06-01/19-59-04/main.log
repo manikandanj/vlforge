@@ -1,2 +1,0 @@
-[2025-06-01 19:59:12,791][root][INFO] - Loaded hf-hub:imageomics/bioclip model config.
-[2025-06-01 19:59:15,920][root][INFO] - Loading pretrained hf-hub:imageomics/bioclip weights (C:\Users\mani_\.cache\huggingface\hub\models--imageomics--bioclip\snapshots\a1a779ecabfa8df4d842e36dafef45a1a4c77a09\open_clip_pytorch_model.bin).
