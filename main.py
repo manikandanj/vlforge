@@ -19,6 +19,7 @@ def main(cfg: DictConfig) -> None:
 
     data_loader = instantiate(cfg.data)
     print(f"Dataset info: {data_loader.get_dataset_info()}")
+    data_loader.explore_dataset()
 
     if cfg.mode == "eval":
         results = {}

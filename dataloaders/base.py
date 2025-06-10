@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Generator, Optional, Dict, Any
 from PIL import Image
+import matplotlib.pyplot as plt
+import numpy as np
+import random
+from collections import defaultdict, Counter
 
 
 class BaseDataLoader(ABC):
@@ -16,7 +20,7 @@ class BaseDataLoader(ABC):
         pass
     
     @abstractmethod
-    def load_image(self, image_identifier: str) -> Image.Image:
+    def load_image(self, image_identifier: str) -> Optional[Image.Image]:
         pass
     
     @abstractmethod
@@ -26,7 +30,44 @@ class BaseDataLoader(ABC):
     @abstractmethod
     def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str]], None, None]:
         pass
-    
+
+    def explore_dataset(self):
+        samples_by_class = defaultdict(list)
+        
+        for batch_images, batch_labels in self.get_batch_data(n_samples=100):
+            for img, label in zip(batch_images, batch_labels):
+                if img is not None and len(samples_by_class[label]) < 3:
+                    samples_by_class[label].append((img, label))
+            break
+        
+        all_samples = []
+        for samples in samples_by_class.values():
+            all_samples.extend(samples)
+        
+        if all_samples:
+            selected = random.sample(all_samples, min(12, len(all_samples)))
+            cols = 4
+            rows = (len(selected) + cols - 1) // cols
+            
+            plt.figure(figsize=(12, rows * 3))
+            for idx, (img, label) in enumerate(selected):
+                plt.subplot(rows, cols, idx + 1)
+                plt.imshow(np.array(img))
+                plt.title(label)
+                plt.axis('off')
+            plt.tight_layout()
+            plt.show()
+        
+        # for class_name, samples in samples_by_class.items():
+        #     if samples:
+        #         plt.figure(figsize=(9, 3))
+        #         for idx, (img, label) in enumerate(samples[:3]):
+        #             plt.subplot(1, 3, idx + 1)
+        #             plt.imshow(np.array(img))
+        #             plt.title(f"{class_name} {idx + 1}")
+        #             plt.axis('off')
+        #         plt.tight_layout()
+        #         plt.show()
     
     def get_dataset_info(self) -> Dict[str, Any]:
         return {

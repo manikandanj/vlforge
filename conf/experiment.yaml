@@ -24,11 +24,18 @@ model:
 #   model_name: "openai/clip-vit-base-patch32"
 
 
+# data:
+#   _target_: "dataloaders.vlmbio_loader.VLMBioDataLoader"
+#   base_dir: "data/VLM4Bio/datasets"
+#   group: "Fish"
+#   metadata_file: "metadata_10k.csv"
+#   batch_size: 128
+
 data:
-  _target_: "dataloaders.vlmbio_loader.VLMBioDataLoader"
-  base_dir: "data/VLM4Bio/datasets"
-  group: "Fish"
-  metadata_file: "metadata_10k.csv"
+  _target_: "dataloaders.butterfly_dataset_loader.ButterflyDatasetDataLoader"
+  base_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data"
+  group: "nymphalidae_whole_specimen-v240606"
+  metadata_file: "data_meta-nymphalidae_whole_specimen-v240606_subset.csv"
   batch_size: 128
 
 #Can add multiple evaluators
