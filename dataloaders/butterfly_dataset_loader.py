@@ -26,7 +26,6 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
 
     def load_image(self, image_identifier: str) -> Optional[Image.Image]:
         img_path = self.img_dir / image_identifier
-        print(f"img_path: {img_path}")
         if img_path.exists():
             return Image.open(img_path).convert("RGB")
         return None

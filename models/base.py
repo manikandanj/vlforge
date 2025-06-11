@@ -25,11 +25,8 @@ class BaseVisionModel(ABC):
     @abstractmethod
     def _encode_text(self, texts: List[str]) -> torch.Tensor:
         pass
-    
-    def zero_shot_classify(self, images, labels):
-        return self._compute_predictions(images, labels)
 
-    def _compute_predictions(self, images, labels):
+    def compute_predictions(self, images, labels):
         with torch.no_grad():
             similarities = self.compute_similarity(images, labels) 
             

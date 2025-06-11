@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from typing import List, Tuple
 from .base import BaseEvaluator
+from PIL import Image
 
 
 class ZeroShotEvaluator(BaseEvaluator):
@@ -10,6 +11,13 @@ class ZeroShotEvaluator(BaseEvaluator):
         super().__init__(n_samples=n_samples, metrics=metrics, 
                         show_progress=show_progress, **kwargs)
         self.show_progress = show_progress
+
+    def zero_shot_classify(self, model, images: List[Image.Image], labels: List[str]) -> Tuple[List[str], List[float]]:
+        """
+        Perform zero-shot classification: evaluate model predictions without training examples.
+        """
+        return model.compute_predictions(images, labels)
+    
     
     def evaluate(self, model, data_loader, device: str) -> Tuple[float, float]:
         n_correct = 0
@@ -23,7 +31,7 @@ class ZeroShotEvaluator(BaseEvaluator):
             if not images:
                 continue
             ## data_loader.get_labels() returns all possible classes in the dataset whereas target_labels has the ground truth
-            predicted_labels, scores = model.zero_shot_classify(images, data_loader.get_labels())
+            predicted_labels, scores = self.zero_shot_classify(model, images, data_loader.get_labels())
             
             for pred, target in zip(predicted_labels, target_labels):
                 if pred == target:
