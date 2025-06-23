@@ -31,6 +31,15 @@ class BaseDataLoader(ABC):
     def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str]], None, None]:
         pass
 
+    def get_frequency_maps(self) -> Optional[Dict[str, Dict[str, int]]]:
+        """Get frequency maps for different taxonomic levels (if supported by the loader)
+        
+        Returns:
+            Dictionary with frequency maps for different levels (e.g., species, genus, subfamily)
+            or None if not supported by this loader
+        """
+        return None
+
     def explore_dataset(self):
         samples_by_class = defaultdict(list)
         
