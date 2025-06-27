@@ -1,15 +1,15 @@
-import math
 from tqdm import tqdm
 from typing import List, Tuple, Dict, Any
-from collections import defaultdict
 from .base import BaseEvaluator
 from PIL import Image
+from sklearn.metrics import ndcg_score
 
 
 class NDCGEvaluator(BaseEvaluator):
     """
     Evaluator that calculates nDCG (Normalized Discounted Cumulative Gain) 
     using taxonomic hierarchy-based relevance scoring.
+    Uses scikit-learn's ndcg_score for robust and simple implementation.
     """
     
     def __init__(self, n_samples: int = 200, metrics: List[str] = None, 
@@ -19,7 +19,6 @@ class NDCGEvaluator(BaseEvaluator):
         super().__init__(n_samples=n_samples, metrics=metrics or metric_names, 
                         show_progress=show_progress, **kwargs)
         self.show_progress = show_progress
-        self.frequency_maps = None
         self.species_to_taxonomy = {}  # Cache for species -> (genus, subfamily) mapping
         
     def _build_species_taxonomy_map(self, data_loader):
@@ -72,31 +71,6 @@ class NDCGEvaluator(BaseEvaluator):
             
         return 0
         
-    def calculate_dcg(self, relevance_scores: List[int], k: int) -> float:
-        """Calculate Discounted Cumulative Gain for top-k results"""
-        dcg = 0.0
-        for i in range(min(k, len(relevance_scores))):
-            if i == 0:
-                dcg += relevance_scores[i]
-            else:
-                dcg += relevance_scores[i] / math.log2(i + 1)
-        return dcg
-        
-    def calculate_idcg(self, relevance_scores: List[int], k: int) -> float:
-        """Calculate Ideal DCG by sorting relevance scores in descending order"""
-        sorted_scores = sorted(relevance_scores, reverse=True)
-        return self.calculate_dcg(sorted_scores, k)
-        
-    def calculate_ndcg(self, relevance_scores: List[int], k: int) -> float:
-        """Calculate Normalized DCG"""
-        dcg = self.calculate_dcg(relevance_scores, k)
-        idcg = self.calculate_idcg(relevance_scores, k)
-        
-        if idcg == 0:
-            return 0.0
-        
-        return dcg / idcg
-        
     def get_ranked_predictions(self, model, query_images: List[Image.Image], 
                              candidate_labels: List[str]) -> List[List[Tuple[str, float]]]:
         """
@@ -131,9 +105,6 @@ class NDCGEvaluator(BaseEvaluator):
         Evaluate model using nDCG metrics.
         Returns (average_loss, average_ndcg) where average_ndcg is the mean of all k values.
         """
-        # Get frequency maps from data loader for taxonomic information
-        self.frequency_maps = data_loader.get_frequency_maps()
-        
         # Build species to taxonomy mapping from metadata
         self._build_species_taxonomy_map(data_loader)
         
@@ -156,15 +127,20 @@ class NDCGEvaluator(BaseEvaluator):
             for i, (query_image, true_label) in enumerate(zip(query_images, true_labels)):
                 ranked_results = batch_predictions[i]
                 
-                # Calculate relevance scores for the ranked results
+                # Calculate relevance scores and prediction scores
                 relevance_scores = []
-                for predicted_label, _ in ranked_results:
+                prediction_scores = []
+                
+                for predicted_label, confidence_score in ranked_results:
                     relevance_score = self.get_relevance_score(true_label, predicted_label)
                     relevance_scores.append(relevance_score)
+                    prediction_scores.append(confidence_score)
                 
-                # Calculate nDCG for each k value
+                # Calculate nDCG for each k value using scikit-learn
                 for k in self.k_values:
-                    ndcg_k = self.calculate_ndcg(relevance_scores, k)
+                    # sklearn expects shape (n_samples, n_outputs) but we have single query
+                    # so we wrap in lists to make it (1, n_candidates)
+                    ndcg_k = ndcg_score([relevance_scores], [prediction_scores], k=k)
                     ndcg_scores[k].append(ndcg_k)
                 
                 total_queries += 1
