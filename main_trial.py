@@ -22,7 +22,9 @@ sns.set_palette("husl")
 
 def precision_at_k(query_species: str, ranked_species: list, k: int, verbose: bool = False) -> float:
     """
-    Calculate Precision@k using binary relevance (same species = relevant).
+    Calculate Precision@k using binary relevance (species-level).
+    
+    Relevance definition: Only exact species matches are considered relevant.
     
     Args:
         query_species: True species of the query image
@@ -48,9 +50,12 @@ def precision_at_k(query_species: str, ranked_species: list, k: int, verbose: bo
     return precision
 
 
-def recall_at_k(query_species: str, ranked_species: list, all_species_in_db: list, k: int, verbose: bool = False) -> float:
+def recall_at_k(query_species: str, ranked_species: list, all_species_in_db: list, k: int, verbose: bool = False, true_relevant_count: int = None) -> float:
     """
-    Calculate Recall@k using binary relevance (same species = relevant).
+    Calculate Recall@k using binary relevance (species-level).
+    If true_relevant_count is provided, use it instead of counting from all_species_in_db.
+    
+    Relevance definition: Only exact species matches are considered relevant.
     
     Args:
         query_species: True species of the query image
@@ -58,6 +63,7 @@ def recall_at_k(query_species: str, ranked_species: list, all_species_in_db: lis
         all_species_in_db: All species present in the database
         k: Number of top results to consider
         verbose: Whether to print detailed calculation steps
+        true_relevant_count: True relevant count if provided
     
     Returns:
         Recall@k score (0.0 to 1.0)
@@ -65,8 +71,11 @@ def recall_at_k(query_species: str, ranked_species: list, all_species_in_db: lis
     if k <= 0 or len(ranked_species) == 0:
         return 0.0
     
-    # Total relevant items in database (all images of same species)
-    total_relevant = sum(1 for species in all_species_in_db if species == query_species)
+    # Use provided true_relevant_count if available
+    if true_relevant_count is not None:
+        total_relevant = true_relevant_count
+    else:
+        total_relevant = sum(1 for species in all_species_in_db if species == query_species)
     
     if total_relevant == 0:
         return 0.0  # No relevant items in database
@@ -81,17 +90,22 @@ def recall_at_k(query_species: str, ranked_species: list, all_species_in_db: lis
     return recall
 
 
-def mean_average_precision(query_species: str, ranked_species: list, verbose: bool = False) -> float:
+def average_precision(query_species: str, ranked_species: list, verbose: bool = False, true_relevant_count: int = None) -> float:
     """
-    Calculate mean Average Precision (mAP) using binary relevance.
+    Calculate Average Precision (AP) using binary relevance (species-level).
+    If true_relevant_count is provided, use it as denominator instead of counting in ranked_species.
+    
+    Note: This is AP for a single query, not mAP (mean Average Precision).
+    mAP would be the mean of AP scores across multiple queries.
     
     Args:
         query_species: True species of the query image
         ranked_species: List of species in ranked order of similarity
         verbose: Whether to print detailed calculation steps
+        true_relevant_count: True relevant count if provided
     
     Returns:
-        mAP score (0.0 to 1.0)
+        AP score (0.0 to 1.0)
     """
     if len(ranked_species) == 0:
         return 0.0
@@ -99,11 +113,15 @@ def mean_average_precision(query_species: str, ranked_species: list, verbose: bo
     relevant_count = 0
     precision_sum = 0.0
     precision_values = []
-    total_relevant = sum(1 for species in ranked_species if species == query_species)
+    # Use provided true_relevant_count if available
+    if true_relevant_count is not None:
+        total_relevant = true_relevant_count
+    else:
+        total_relevant = sum(1 for species in ranked_species if species == query_species)
     
     if total_relevant == 0:
         if verbose:
-            print("  No relevant items found, mAP = 0.000")
+            print("  No relevant items found, AP = 0.000")
         return 0.0  # No relevant items
     
     for i, species in enumerate(ranked_species):
@@ -115,12 +133,12 @@ def mean_average_precision(query_species: str, ranked_species: list, verbose: bo
             if verbose:
                 print(f"  Relevant item found at rank {i+1}: Precision = {relevant_count}/{i+1} = {precision_at_i:.3f}")
     
-    map_score = precision_sum / total_relevant
+    ap_score = precision_sum / total_relevant
     
     if verbose:
-        print(f"  mAP = ({' + '.join([f'{p:.3f}' for p in precision_values])}) / {total_relevant} = {map_score:.3f}")
+        print(f"  AP = ({' + '.join([f'{p:.3f}' for p in precision_values])}) / {total_relevant} = {ap_score:.3f}")
     
-    return map_score
+    return ap_score
 
 
 def get_relevance_score(query_species: str, result_species: str, 
@@ -153,7 +171,13 @@ def get_relevance_score(query_species: str, result_species: str,
 
 def ndcg_at_k(query_species: str, ranked_results: list, query_taxonomy: dict, k: int, verbose: bool = False) -> float:
     """
-    Calculate nDCG@k using hierarchical relevance scoring.
+    Calculate nDCG@k using hierarchical relevance scoring (multi-level taxonomy).
+    
+    Relevance levels:
+    - Species match: 3 (Highly Relevant)
+    - Genus match: 2 (Relevant)
+    - Subfamily match: 1 (Partially Relevant)
+    - No match: 0 (Irrelevant)
     
     Args:
         query_species: True species of the query image
@@ -174,7 +198,7 @@ def ndcg_at_k(query_species: str, ranked_results: list, query_taxonomy: dict, k:
     
     if verbose:
         print(f"nDCG@{k} CALCULATION:")
-        print("(Hierarchical relevance: Species=3, Genus=2, Subfamily=1, None=0)")
+        print("(Multi-level taxonomic relevance: Species=3, Genus=2, Subfamily=1, None=0)")
     
     for i, (species, similarity_score, taxonomy) in enumerate(ranked_results[:k]):
         relevance = get_relevance_score(query_species, species, query_taxonomy, taxonomy)
@@ -204,7 +228,7 @@ def ndcg_at_k(query_species: str, ranked_results: list, query_taxonomy: dict, k:
     return ndcg
 
 
-def calculate_all_metrics(query_info: dict, results_df: pd.DataFrame, database_species: list, k_values: list = [1, 5, 15], verbose: bool = False) -> dict:
+def calculate_all_metrics(query_info: dict, results_df: pd.DataFrame, database_species: list, true_relevant_count: int = None, k_values: list = [1, 5, 15], verbose: bool = False) -> dict:
     """
     Calculate all evaluation metrics for a single query.
     
@@ -238,7 +262,7 @@ def calculate_all_metrics(query_info: dict, results_df: pd.DataFrame, database_s
     
     if verbose:
         print("PRECISION@K CALCULATIONS:")
-        print("(Relevant items in top-k / k)")
+        print("(Binary relevance - species-level matches only)")
     
     # Calculate metrics for each k value
     for k in k_values:
@@ -246,17 +270,17 @@ def calculate_all_metrics(query_info: dict, results_df: pd.DataFrame, database_s
         
     if verbose:
         print("\nRECALL@K CALCULATIONS:")
-        print("(Relevant items in top-k / total relevant in database)")
+        print("(Binary relevance - species-level matches only)")
         
     for k in k_values:
-        metrics[f'recall@{k}'] = recall_at_k(query_species, ranked_species, database_species, k, verbose)
+        metrics[f'recall@{k}'] = recall_at_k(query_species, ranked_species, database_species, k, verbose, true_relevant_count)
     
     if verbose:
-        print("\nmAP CALCULATION:")
-        print("(Average precision at each relevant item)")
+        print("\nAP CALCULATION:")
+        print("(Average Precision for single query - species-level relevance)")
     
-    # Calculate mAP (using all results)
-    metrics['mAP'] = mean_average_precision(query_species, ranked_species, verbose)
+    # Calculate AP (using all results)
+    metrics['mAP'] = average_precision(query_species, ranked_species, verbose, true_relevant_count)
     
     if verbose:
         print()
@@ -270,7 +294,7 @@ def calculate_all_metrics(query_info: dict, results_df: pd.DataFrame, database_s
     return metrics
 
 
-def create_demo_visualization(query_info, results_df, data_loader, metrics, save_path="demo_similarity_results.png"):
+def create_demo_visualization(query_info, results_df, data_loader, metrics, database_stats, save_path="demo_similarity_results.png"):
     """
     Create a captivating visualization showing query image and top similar images
     """
@@ -346,30 +370,36 @@ def create_demo_visualization(query_info, results_df, data_loader, metrics, save
         
         ax.axis('off')
     
-    # Add summary statistics box (bottom area)
-    summary_text = f"""SEARCH SUMMARY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Query: {query_info['species']}
-Database Size: {len(results_df)} images searched
+    # Add summary statistics box (bottom area) - 3 column layout
+    species_matches = sum(results_df['same_species'])
+    genus_matches = sum(results_df['same_genus'])
+    subfamily_matches = sum(results_df['same_subfamily'])
+    
+    summary_text = f"""SIMILARITY SEARCH RESULTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-PRECISION@K:           RECALL@K:             nDCG@K:
-@1: {metrics['precision@1']:.3f}             @1: {metrics['recall@1']:.3f}            @1: {metrics['ndcg@1']:.3f}
-@5: {metrics['precision@5']:.3f}             @5: {metrics['recall@5']:.3f}            @5: {metrics['ndcg@5']:.3f}
-@15: {metrics['precision@15']:.3f}            @15: {metrics['recall@15']:.3f}           @15: {metrics['ndcg@15']:.3f}
-
-mAP: {metrics['mAP']:.3f}
-
-TAXONOMY MATCHES:
-Species: {sum(results_df['same_species'])} / {len(results_df)}
-Genus: {sum(results_df['same_genus'])} / {len(results_df)}
-Subfamily: {sum(results_df['same_subfamily'])} / {len(results_df)}
+SEARCH CONTEXT                 BINARY RELEVANCE METRICS      HIERARCHICAL RELEVANCE METRICS
+                               (Species-level match)         (Multi-level taxonomy)
+───────────────────────────────┼───────────────────────────────┼───────────────────────────────
+Query Species:                 │                               │
+{query_info['species']:<30} │ PRECISION@K:                  │ nDCG@K:
+                               │ @1:  {metrics['precision@1']:.3f}                    │ @1:  {metrics['ndcg@1']:.3f}
+Database Size: {database_stats['total_size']:<14}  │ @5:  {metrics['precision@5']:.3f}                    │ @5:  {metrics['ndcg@5']:.3f}
+Relevant in DB: {database_stats['relevant_count']:<13}  │ @15: {metrics['precision@15']:.3f}                    │ @15: {metrics['ndcg@15']:.3f}
+Retrieved: {len(results_df):<19} │                               │
+                               │ RECALL@K:                     │ Relevance Scale:
+RETRIEVED DISTRIBUTION:        │ @1:  {metrics['recall@1']:.3f}                    │ Species = 3 (High)
+Species:   {species_matches:>2}/{len(results_df):<2}               │ @5:  {metrics['recall@5']:.3f}                    │ Genus = 2 (Medium)
+Genus:     {genus_matches:>2}/{len(results_df):<2}               │ @15: {metrics['recall@15']:.3f}                    │ Subfamily = 1 (Low)
+Subfamily: {subfamily_matches:>2}/{len(results_df):<2}               │                               │ None = 0 (Irrelevant)
+                               │ AP (Single Query): {metrics['mAP']:.3f}      │
     """
     
     fig.text(0.02, 0.02, summary_text, fontsize=11, fontfamily='monospace',
              bbox=dict(boxstyle="round,pad=0.5", facecolor='#ecf0f1', alpha=0.9),
              verticalalignment='bottom')
     
-    plt.subplots_adjust(top=0.90, bottom=0.30, left=0.02, right=0.98)
+    plt.subplots_adjust(top=0.90, bottom=0.35, left=0.02, right=0.98)
     
     # Save the visualization
     plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
@@ -404,7 +434,7 @@ def main(cfg: DictConfig) -> None:
     
     # Process batches and collect data
     batch_count = 0
-    for images, labels, unique_ids in data_loader.get_batch_data(n_samples=100):  # Adjust n_samples as needed
+    for images, labels, unique_ids in data_loader.get_batch_data(n_samples=len(data_loader.df_meta)):
         print(f"Processing batch {batch_count + 1} with {len(images)} images")
         
         # Get embeddings for this batch
@@ -588,8 +618,27 @@ def main(cfg: DictConfig) -> None:
                 print(f"  Rank {i+1}: {row['species']} (Sim: {row['similarity_score']:.3f}) [{match_type}]")
             print()
             
+            # Calculate database statistics for visualization
+            total_dataset_size = len(data_loader.df_meta)  # Full dataset size (should be ~647)
+            query_species = query_image_info['species']
+            database_stats = {
+                'total_size': len(database_df),
+                'relevant_count': sum(1 for s in database_df['species'] if s == query_species)
+            }
+            
+            print(f"\nDATABASE STATISTICS:")
+            print(f"Full dataset size: {total_dataset_size} images")
+            print(f"Database size (80% split): {database_stats['total_size']} images")
+            print(f"Relevant images in full dataset: {database_stats['relevant_count']} images")
+            print(f"Retrieved for ranking: {len(results_df)} images")
+            
             # Calculate all metrics with verbose logging
-            metrics = calculate_all_metrics(query_image_info.to_dict(), results_df, database_species, verbose=True)
+            metrics = calculate_all_metrics(
+                query_image_info.to_dict(),
+                results_df,
+                database_species,
+                verbose=True
+            )
             
             # Print final metrics summary
             print("\nFINAL EVALUATION METRICS:")
@@ -606,10 +655,10 @@ def main(cfg: DictConfig) -> None:
             print(f"nDCG@5: {metrics['ndcg@5']:.3f}")
             print(f"nDCG@15: {metrics['ndcg@15']:.3f}")
             print()
-            print(f"mAP: {metrics['mAP']:.3f}")
+            print(f"AP: {metrics['mAP']:.3f}")
             
             # Create the demo visualization
-            create_demo_visualization(query_image_info, results_df, data_loader, metrics)
+            create_demo_visualization(query_image_info, results_df, data_loader, metrics, database_stats)
             print("Demo visualization completed successfully!")
         except Exception as e:
             print(f"Error creating visualization: {e}")
