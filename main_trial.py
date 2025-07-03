@@ -12,6 +12,8 @@ import seaborn as sns
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 from utils.common import set_seed
+import os
+from datetime import datetime
 
 # Set style for professional plots
 plt.style.use('default')
@@ -210,13 +212,16 @@ def ndcg_at_k(query_species: str, ranked_results: list, query_taxonomy: dict, k:
     # Calculate DCG
     dcg = 0.0
     for i, relevance in enumerate(relevance_scores):
-        dcg += relevance / np.log2(i + 2)  # i+2 because log2(1) is 0
-    
+        #Using exponential gain instead of linear gain
+        dcg += (2**relevance - 1) / np.log2(i + 2)
     # Calculate ideal DCG (best possible ordering)
     ideal_relevance = sorted(relevance_scores, reverse=True)
     idcg = 0.0
     for i, relevance in enumerate(ideal_relevance):
-        idcg += relevance / np.log2(i + 2)
+        # idcg += relevance / np.log2(i + 2)
+        #Using exponential gain instead of linear gain
+        idcg += (2**relevance - 1) / np.log2(i + 2)
+        
     
     ndcg = dcg / idcg if idcg > 0 else 0.0
     
@@ -382,12 +387,12 @@ SEARCH CONTEXT                 BINARY RELEVANCE METRICS      HIERARCHICAL RELEVA
                                (Species-level match)         (Multi-level taxonomy)
 ───────────────────────────────┼───────────────────────────────┼───────────────────────────────
 Query Species:                 │                               │
-{query_info['species']:<30} │ PRECISION@K:                  │ nDCG@K:
+{query_info['species']:<30} │ PRECISION@K:                  │ nDCG@K: 
                                │ @1:  {metrics['precision@1']:.3f}                    │ @1:  {metrics['ndcg@1']:.3f}
 Database Size: {database_stats['total_size']:<14}  │ @5:  {metrics['precision@5']:.3f}                    │ @5:  {metrics['ndcg@5']:.3f}
 Relevant in DB: {database_stats['relevant_count']:<13}  │ @15: {metrics['precision@15']:.3f}                    │ @15: {metrics['ndcg@15']:.3f}
 Retrieved: {len(results_df):<19} │                               │
-                               │ RECALL@K:                     │ Relevance Scale:
+                               │ RECALL@K:                     │ Relevance Scale (Exponential Gain):
 RETRIEVED DISTRIBUTION:        │ @1:  {metrics['recall@1']:.3f}                    │ Species = 3 (High)
 Species:   {species_matches:>2}/{len(results_df):<2}               │ @5:  {metrics['recall@5']:.3f}                    │ Genus = 2 (Medium)
 Genus:     {genus_matches:>2}/{len(results_df):<2}               │ @15: {metrics['recall@15']:.3f}                    │ Subfamily = 1 (Low)
@@ -404,8 +409,6 @@ Subfamily: {subfamily_matches:>2}/{len(results_df):<2}               │        
     # Save the visualization
     plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
     print(f"Demo visualization saved to: {save_path}")
-    
-    plt.show()
     
     return fig
 
@@ -520,149 +523,74 @@ def main(cfg: DictConfig) -> None:
         query_embeddings = query_df[embedding_cols].values
         database_embeddings = database_df[embedding_cols].values
         
-        # Take the first query image
-        query_idx = 0
-        query_image_info = query_df.iloc[query_idx]
-        query_embedding = query_embeddings[query_idx:query_idx+1]  # Keep 2D shape
-        
-        print(f"\nQuery Image:")
-        print(f"  Unique ID: {query_image_info['unique_id']}")
-        print(f"  Species: {query_image_info['species']}")
-        print(f"  Genus: {query_image_info['genus']}")
-        print(f"  Subfamily: {query_image_info['subfamily']}")
-        
-        # Calculate cosine similarity between query and all database images
-        similarities = cosine_similarity(query_embedding, database_embeddings)[0]
-        
-        # Get top 15 most similar images
-        top_k = 15
-        top_indices = np.argsort(similarities)[::-1][:top_k]  # Sort descending, take top k
-        
-        print(f"\nTop {top_k} Most Similar Images:")
-        print("-" * 80)
-        
-        results_data = []
-        for rank, db_idx in enumerate(top_indices, 1):
-            similar_image = database_df.iloc[db_idx]
-            similarity_score = similarities[db_idx]
-            
-            # Check if it's the same species (for evaluation)
-            same_species = similar_image['species'] == query_image_info['species']
-            same_genus = similar_image['genus'] == query_image_info['genus']
-            same_subfamily = similar_image['subfamily'] == query_image_info['subfamily']
-            
-            print(f"Rank {rank}: {similar_image['unique_id']}")
-            print(f"  Similarity: {similarity_score:.4f}")
-            print(f"  Species: {similar_image['species']} {'✓' if same_species else '✗'}")
-            print(f"  Genus: {similar_image['genus']} {'✓' if same_genus else '✗'}")
-            print(f"  Subfamily: {similar_image['subfamily']} {'✓' if same_subfamily else '✗'}")
-            print()
-            
-            # Store for analysis
-            results_data.append({
-                'rank': rank,
-                'unique_id': similar_image['unique_id'],
-                'similarity_score': similarity_score,
-                'species': similar_image['species'],
-                'genus': similar_image['genus'],
-                'subfamily': similar_image['subfamily'],
-                'same_species': same_species,
-                'same_genus': same_genus,
-                'same_subfamily': same_subfamily
-            })
-        
-        # Create results dataframe
-        results_df = pd.DataFrame(results_data)
-        
-
-        
-        # Save results
-        results_output_path = "similarity_search_results.csv"
-        results_df.to_csv(results_output_path, index=False)
-        print(f"Results saved to: {results_output_path}")
-        
-        # Store globally for further analysis
-        globals()['query_df'] = query_df
-        globals()['database_df'] = database_df
-        globals()['results_df'] = results_df
-        
-        # ========== CREATE STUNNING DEMO VISUALIZATION ==========
-        print("\n" + "="*60)
-        print("CREATING DEMO VISUALIZATION")
-        print("="*60)
-        
-        try:
-            # Calculate evaluation metrics
-            print("Calculating evaluation metrics...")
+        # Take the first n query images
+        NUM_QUERY_IMAGES = 50  # Change this value to set number of queries
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_dir = os.path.join("metrics", timestamp)
+        os.makedirs(output_dir, exist_ok=True)
+        num_queries = min(NUM_QUERY_IMAGES, len(query_df))
+        for query_idx in range(num_queries):
+            query_image_info = query_df.iloc[query_idx]
+            query_embedding = query_embeddings[query_idx:query_idx+1]  # Keep 2D shape
+            print(f"\nQuery Image {query_idx+1}:")
+            print(f"  Unique ID: {query_image_info['unique_id']}")
+            print(f"  Species: {query_image_info['species']}")
+            print(f"  Genus: {query_image_info['genus']}")
+            print(f"  Subfamily: {query_image_info['subfamily']}")
+            # Calculate cosine similarity between query and all database images
+            similarities = cosine_similarity(query_embedding, database_embeddings)[0]
+            # Get top 15 most similar images
+            top_k = 15
+            top_indices = np.argsort(similarities)[::-1][:top_k]
+            results_data = []
+            for rank, db_idx in enumerate(top_indices, 1):
+                similar_image = database_df.iloc[db_idx]
+                similarity_score = similarities[db_idx]
+                same_species = similar_image['species'] == query_image_info['species']
+                same_genus = similar_image['genus'] == query_image_info['genus']
+                same_subfamily = similar_image['subfamily'] == query_image_info['subfamily']
+                results_data.append({
+                    'rank': rank,
+                    'unique_id': similar_image['unique_id'],
+                    'similarity_score': similarity_score,
+                    'species': similar_image['species'],
+                    'genus': similar_image['genus'],
+                    'subfamily': similar_image['subfamily'],
+                    'same_species': same_species,
+                    'same_genus': same_genus,
+                    'same_subfamily': same_subfamily
+                })
+            results_df = pd.DataFrame(results_data)
+            # Save results for each query
+            results_output_path = os.path.join(output_dir, f"{query_image_info['unique_id']}_results.csv")
+            results_df.to_csv(results_output_path, index=False)
+            # Calculate metrics
             database_species = database_df['species'].tolist()
-            
-            # Add detailed logging to show how metrics are calculated
-            query_species = query_image_info['species']
-            ranked_species = results_df['species'].tolist()
-            
-            print(f"\nDETAILED METRIC CALCULATIONS:")
-            print("=" * 80)
-            print(f"Query Species: {query_species}")
-            print(f"Total Database Images: {len(database_species)}")
-            print(f"Database species of same type: {database_species.count(query_species)}")
-            print(f"Retrieved Results: {len(ranked_species)}")
-            print()
-            
-            print("RANKED RESULTS:")
-            for i, (_, row) in enumerate(results_df.iterrows()):
-                match_type = "SPECIES" if row['species'] == query_species else (
-                    "GENUS" if row['genus'] == query_image_info['genus'] else (
-                        "SUBFAMILY" if row['subfamily'] == query_image_info['subfamily'] else "NO MATCH"
-                    )
-                )
-                print(f"  Rank {i+1}: {row['species']} (Sim: {row['similarity_score']:.3f}) [{match_type}]")
-            print()
-            
-            # Calculate database statistics for visualization
-            total_dataset_size = len(data_loader.df_meta)  # Full dataset size (should be ~647)
-            query_species = query_image_info['species']
-            database_stats = {
-                'total_size': len(database_df),
-                'relevant_count': sum(1 for s in database_df['species'] if s == query_species)
-            }
-            
-            print(f"\nDATABASE STATISTICS:")
-            print(f"Full dataset size: {total_dataset_size} images")
-            print(f"Database size (80% split): {database_stats['total_size']} images")
-            print(f"Relevant images in full dataset: {database_stats['relevant_count']} images")
-            print(f"Retrieved for ranking: {len(results_df)} images")
-            
-            # Calculate all metrics with verbose logging
             metrics = calculate_all_metrics(
                 query_image_info.to_dict(),
                 results_df,
                 database_species,
-                verbose=True
+                true_relevant_count=sum(1 for s in database_df['species'] if s == query_image_info['species']),
+                verbose=False
             )
-            
-            # Print final metrics summary
-            print("\nFINAL EVALUATION METRICS:")
-            print("-" * 50)
-            print(f"Precision@1: {metrics['precision@1']:.3f}")
-            print(f"Precision@5: {metrics['precision@5']:.3f}")
-            print(f"Precision@15: {metrics['precision@15']:.3f}")
-            print()
-            print(f"Recall@1: {metrics['recall@1']:.3f}")
-            print(f"Recall@5: {metrics['recall@5']:.3f}")
-            print(f"Recall@15: {metrics['recall@15']:.3f}")
-            print()
-            print(f"nDCG@1: {metrics['ndcg@1']:.3f}")
-            print(f"nDCG@5: {metrics['ndcg@5']:.3f}")
-            print(f"nDCG@15: {metrics['ndcg@15']:.3f}")
-            print()
-            print(f"AP: {metrics['mAP']:.3f}")
-            
-            # Create the demo visualization
-            create_demo_visualization(query_image_info, results_df, data_loader, metrics, database_stats)
-            print("Demo visualization completed successfully!")
-        except Exception as e:
-            print(f"Error creating visualization: {e}")
-            print("Continuing without visualization...")
+            # Calculate database statistics for visualization
+            database_stats = {
+                'total_size': len(database_df),
+                'relevant_count': sum(1 for s in database_df['species'] if s == query_image_info['species'])
+            }
+            # Save visualization image
+            # If unique_id already ends with .png, don't add .png again
+            unique_id = query_image_info['unique_id']
+            if unique_id.lower().endswith('.png'):
+                save_path = os.path.join(output_dir, unique_id)
+            else:
+                save_path = os.path.join(output_dir, f"{unique_id}.png")
+            try:
+                create_demo_visualization(query_image_info, results_df, data_loader, metrics, database_stats, save_path=save_path)
+                print(f"Saved visualization for query {query_image_info['unique_id']} to {save_path}")
+            except Exception as e:
+                print(f"Error creating visualization for {query_image_info['unique_id']}: {e}")
+                print("Continuing to next query...")
         
     else:
         print("No data collected!")

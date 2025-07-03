@@ -3,3 +3,5 @@
 __pycache__/
 *.py[cod]
 *$py.class
+/demo_similarity_results
+/metrics
