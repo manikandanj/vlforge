@@ -1,7 +1,7 @@
 import pandas as pd
 from PIL import Image
 from pathlib import Path
-from typing import List, Tuple, Generator, Optional, Dict
+from typing import List, Tuple, Generator, Optional, Dict, Any
 from .base import BaseDataLoader
 
 
@@ -60,14 +60,48 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
     def get_labels(self) -> List[str]:
         return self._labels
     
+    def get_metadata_for_ids(self, unique_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get metadata for specific mask_names"""
+        metadata_list = []
+        
+        for unique_id in unique_ids:
+            # Find the row with matching mask_name
+            matching_rows = self.df_meta[self.df_meta["mask_name"] == unique_id]
+            
+            if not matching_rows.empty:
+                row = matching_rows.iloc[0]  # Take first match
+                metadata = {
+                    "species": row.get("species", ""),
+                    "genus": row.get("genus", ""),
+                    "subfamily": row.get("subfamily", ""),
+                    "mask_name": row.get("mask_name", ""),
+                    # Add any other fields that might be useful
+                }
+                # Add any additional fields that exist in the dataframe
+                for col in self.df_meta.columns:
+                    if col not in metadata:
+                        metadata[col] = row.get(col, "")
+            else:
+                # Return empty metadata if not found
+                metadata = {
+                    "species": "",
+                    "genus": "",
+                    "subfamily": "",
+                    "mask_name": unique_id,
+                }
+                
+            metadata_list.append(metadata)
+            
+        return metadata_list
     
-    def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str]], None, None]:
+    def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str], List[str]], None, None]:
         for idx_start in range(0, n_samples, self.batch_size):
             idx_end = min(idx_start + self.batch_size, n_samples)
             df_batch = self.df_meta[idx_start:idx_end]
             
             images = []
             labels = []
+            unique_ids = []
             
             for _, row in df_batch.iterrows():
                 try:
@@ -75,6 +109,7 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
                     if img is not None:  # Only add non-None images
                         images.append(img)
                         labels.append(row["species"])
+                        unique_ids.append(row["mask_name"])
                     else:
                         print(f"Warning: Image not found: {row['mask_name']}")
                 except Exception as e:
@@ -82,4 +117,4 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
                     continue
             
             if images: 
-                yield images, labels 
+                yield images, labels, unique_ids 

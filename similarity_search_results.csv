@@ -1,0 +1,16 @@
+rank,unique_id,similarity_score,species,genus,subfamily,same_species,same_genus,same_subfamily
+1,bd06fcab-5fa06e1f-fb08a886-81589a8a_1.png,0.93652165,acraea_bonasia,acraea,heliconiinae,True,True,True
+2,fa7ba109-33a7f915-c9d74bcb-019dfcaa_1.png,0.9346383,acraea_bonasia,acraea,heliconiinae,True,True,True
+3,e4b7106e-2164f9ba-e7887ca0-df2e8efd_1.png,0.9165543,acraea_bonasia,acraea,heliconiinae,True,True,True
+4,176f496a-9846339b-8332d220-a0fe6634_1.png,0.86825967,acraea_acerata,acraea,heliconiinae,False,True,True
+5,309d9a74-e93b1ad2-9c0a1505-be1a7901_1.png,0.8628823,acraea_cabira,acraea,heliconiinae,False,True,True
+6,8628a92e-81353198-854b0ff0-d198b58f_1.png,0.8620812,acraea_bonasia,acraea,heliconiinae,True,True,True
+7,58f8356b-e6c99f64-51ae9eb5-112f8eb1_1.png,0.85259503,acraea_acerata,acraea,heliconiinae,False,True,True
+8,10654889-9714dcdd-4e330949-222b4261_1.png,0.8486809,acraea_acerata,acraea,heliconiinae,False,True,True
+9,0e59ea88-f3bd9891-5ef0e6c5-2f713eac_1.png,0.771676,acraea_alalia,acraea,heliconiinae,False,True,True
+10,5370782c-cee1046d-e36231a9-c39a6382_1.png,0.75901276,acraea_aganice,acraea,heliconiinae,False,True,True
+11,bacc8249-2903c6a3-25a5059e-69381f2c_1.png,0.7429624,acraea_alciope,acraea,heliconiinae,False,True,True
+12,26d22940-2afa76ca-891f1687-bee3be9d_1.png,0.7357813,abananote_erinome,abananote,heliconiinae,False,False,True
+13,5536aaa3-747cfd93-03dfb25c-8ba305f3_1.png,0.7241167,abananote_erinome,abananote,heliconiinae,False,False,True
+14,cd935f46-2d998d16-16656f3b-c58b40a4_1.png,0.72001976,acraea_alciope,acraea,heliconiinae,False,True,True
+15,b0086d18-7fac7204-7178cc9a-1d878955_1.png,0.7003465,acraea_cepheus,acraea,heliconiinae,False,True,True

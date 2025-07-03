@@ -6,7 +6,7 @@ hydra:
     chdir: false 
     
 experiment:
-  name: "butterfly_eval_initial_project_setup"
+  name: "butterfly_eval_initial_project_setup_full_nymphalidae_dataset"
   seed: 42
   device: "cuda"
 
@@ -34,6 +34,9 @@ model:
 data:
   _target_: "dataloaders.butterfly_dataset_loader.ButterflyDatasetDataLoader"
   base_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data"
+  metadata_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data\\nymphalidae_whole_specimen-v240606\\metadata"
+  # base_dir: "/blue/arthur.porto-biocosmos/data/datasets"
+  # metadata_dir: "/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v240606/metadata"
   group: "nymphalidae_whole_specimen-v240606"
   metadata_file: "data_meta-nymphalidae_whole_specimen-v240606_subset.csv"
   batch_size: 128

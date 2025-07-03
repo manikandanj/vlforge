@@ -27,7 +27,7 @@ class ZeroShotEvaluator(BaseEvaluator):
         if self.show_progress:
             data_iter = tqdm(data_iter, desc="Zero-Shot Eval")
         
-        for images, target_labels in data_iter:
+        for images, target_labels, unique_ids in data_iter:
             if not images:
                 continue
             ## data_loader.get_labels() returns all possible classes in the dataset whereas target_labels has the ground truth

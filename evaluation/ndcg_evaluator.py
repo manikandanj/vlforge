@@ -27,13 +27,23 @@ class NDCGEvaluator(BaseEvaluator):
         """
         self.species_to_taxonomy = {}
         
-        # Access the metadata DataFrame from the butterfly data loader
-        if hasattr(data_loader, 'df_meta'):
-            df_meta = data_loader.df_meta
-            for _, row in df_meta.iterrows():
-                species = row['species']
-                genus = row['genus'] if 'genus' in row else ""
-                subfamily = row['subfamily'] if 'subfamily' in row else ""
+        # Get all unique labels (species) from the data loader
+        all_species = data_loader.get_labels()
+        
+        # For butterfly dataset, we need to get some sample unique_ids to build the taxonomy map
+        # Sample a small batch to get representative metadata
+        sample_metadata = []
+        for images, labels, unique_ids in data_loader.get_batch_data(n_samples=100):
+            metadata_batch = data_loader.get_metadata_for_ids(unique_ids)
+            sample_metadata.extend(metadata_batch)
+            break  # Just need one batch to build the map
+        
+        # Build species to taxonomy mapping from the metadata
+        for metadata in sample_metadata:
+            species = metadata.get('species', '')
+            if species:
+                genus = metadata.get('genus', '')
+                subfamily = metadata.get('subfamily', '')
                 
                 # Store the taxonomic information for this species
                 self.species_to_taxonomy[species] = {
@@ -117,7 +127,7 @@ class NDCGEvaluator(BaseEvaluator):
             
         total_queries = 0
         
-        for query_images, true_labels in data_iter:
+        for query_images, true_labels, unique_ids in data_iter:
             if not query_images:
                 continue
                 
