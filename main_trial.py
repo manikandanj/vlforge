@@ -467,15 +467,18 @@ def main(cfg: DictConfig) -> None:
         print("Creating comprehensive dataframe...")
         
         # Start with metadata
-        df = pd.DataFrame(all_metadata)
+        metadata_df = pd.DataFrame(all_metadata)
         
-        # Add unique_ids as a separate column for clarity
-        df['unique_id'] = all_unique_ids
+        # Create unique_ids dataframe
+        unique_ids_df = pd.DataFrame({'unique_id': all_unique_ids})
         
-        # Add embedding dimensions as separate columns
+        # Create embedding dimensions dataframe efficiently
         embedding_dim = combined_embeddings.shape[1]
-        for i in range(embedding_dim):
-            df[f'embedding_dim_{i}'] = combined_embeddings[:, i]
+        embedding_columns = [f'embedding_dim_{i}' for i in range(embedding_dim)]
+        embeddings_df = pd.DataFrame(combined_embeddings, columns=embedding_columns)
+        
+        # Concatenate all dataframes at once to avoid fragmentation
+        df = pd.concat([metadata_df, unique_ids_df, embeddings_df], axis=1)
         
         print(f"Dataframe created with shape: {df.shape}")
         print(f"Columns: {list(df.columns)}")
@@ -524,7 +527,7 @@ def main(cfg: DictConfig) -> None:
         database_embeddings = database_df[embedding_cols].values
         
         # Take the first n query images
-        NUM_QUERY_IMAGES = 50  # Change this value to set number of queries
+        NUM_QUERY_IMAGES = 1  # Change this value to set number of queries
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_dir = os.path.join("metrics", timestamp)
         os.makedirs(output_dir, exist_ok=True)
@@ -571,7 +574,7 @@ def main(cfg: DictConfig) -> None:
                 results_df,
                 database_species,
                 true_relevant_count=sum(1 for s in database_df['species'] if s == query_image_info['species']),
-                verbose=False
+                verbose=True
             )
             # Calculate database statistics for visualization
             database_stats = {
