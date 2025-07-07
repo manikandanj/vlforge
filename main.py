@@ -31,7 +31,7 @@ def main(cfg: DictConfig) -> None:
             results[evaluator.evaluator_name] = {"loss": loss, "metric": metric}
               
         for eval_name, result in results.items():
-            print(f"{eval_name:25}: loss={result['loss']:.4f}, metric={result['metric']:.4f}")
+            print(f"{eval_name:25}: metric={result['metric']:.4f}")
     
     elif cfg.mode == "train":
         print("Training mode not implemented yet")

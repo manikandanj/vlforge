@@ -19,7 +19,7 @@ model:
 
 # Comment other model and uncomment this one to use OpenAI CLIP
 # model:
-#   _target_: "models.openai_clip.OpenAICLIPModel" 
+#   _target_: "models.openai_clip.OpenAICLIPModel"
 #   device: "cuda"
 #   model_name: "openai/clip-vit-base-patch32"
 
@@ -41,10 +41,26 @@ data:
   metadata_file: "data_meta-nymphalidae_whole_specimen-v240606_subset.csv"
   batch_size: 128
 
-#Can add multiple evaluators
+# Evaluation metrics from main_trial.py integrated as pluggable evaluators
 evaluators:
-  - _target_: "evaluation.zero_shot_evaluator.ZeroShotEvaluator"
-    n_samples: 2000
-    metrics: ["accuracy"]
+  # Binary relevance metrics (species-level matches only)
+  - _target_: "evaluation.precision_at_k_evaluator.PrecisionAtKEvaluator"
+    n_samples: 500
+    k_values: [1, 5, 50]
     show_progress: true
     
+  - _target_: "evaluation.recall_at_k_evaluator.RecallAtKEvaluator"
+    n_samples: 500
+    k_values: [1, 5, 50]
+    show_progress: true
+    
+  - _target_: "evaluation.map_evaluator.mAPEvaluator"
+    n_samples: 500
+    show_progress: true
+    
+  # Hierarchical relevance metrics (multi-level taxonomy with exponential gain)
+  - _target_: "evaluation.ndcg_evaluator.NDCGEvaluator"
+    n_samples: 500
+    k_values: [1, 5, 50]
+    primary_k: 50
+    show_progress: true
