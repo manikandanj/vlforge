@@ -3,6 +3,7 @@ from typing import List, Tuple, Dict, Any
 from .base import BaseEvaluator
 from PIL import Image
 import numpy as np
+import pandas as pd
 
 
 class NDCGEvaluator(BaseEvaluator):
@@ -160,6 +161,92 @@ class NDCGEvaluator(BaseEvaluator):
             predictions.append(ranked_results)
             
         return predictions
+
+    def evaluate_with_embeddings(self, query_embeddings: np.ndarray, query_metadata: pd.DataFrame,
+                               database_embeddings: np.ndarray, database_metadata: pd.DataFrame,
+                               device: str) -> Tuple[float, float]:
+        """
+        Evaluate using pre-computed embeddings with image-to-image similarity.
+        
+        Args:
+            query_embeddings: (n_queries, embedding_dim) array
+            query_metadata: DataFrame with metadata for query images
+            database_embeddings: (n_database, embedding_dim) array  
+            database_metadata: DataFrame with metadata for database images
+            device: Device string (for compatibility)
+            
+        Returns:
+            Tuple of (loss, primary_ndcg)
+        """
+        # Build species to taxonomy mapping from metadata
+        self._build_species_taxonomy_map_from_metadata(database_metadata)
+        
+        ndcg_scores = {k: [] for k in self.k_values}
+        
+        # Limit number of queries if n_samples is specified
+        n_queries = min(self.n_samples, len(query_embeddings)) if self.n_samples else len(query_embeddings)
+        
+        # Calculate similarities for all queries at once
+        similarities = self.get_image_to_image_similarities(query_embeddings[:n_queries], database_embeddings)
+        
+        query_iterator = range(n_queries)
+        if self.show_progress:
+            query_iterator = tqdm(query_iterator, desc="nDCG Evaluation (Image-to-Image, Hierarchical)")
+        
+        for query_idx in query_iterator:
+            query_species = query_metadata.iloc[query_idx]['species']
+            query_similarities = similarities[query_idx]
+            
+            # Sort database by similarity descending and create ranked results
+            sorted_indices = np.argsort(query_similarities)[::-1]
+            ranked_results = []
+            for idx in sorted_indices:
+                species = database_metadata.iloc[idx]['species']
+                similarity_score = query_similarities[idx]
+                ranked_results.append((species, similarity_score))
+            
+            # Calculate nDCG for each k value using hierarchical implementation
+            for k in self.k_values:
+                ndcg_k = self.ndcg_at_k(query_species, ranked_results, k)
+                ndcg_scores[k].append(ndcg_k)
+        
+        # Calculate mean nDCG scores across all queries
+        avg_ndcg_scores = {}
+        for k in self.k_values:
+            if ndcg_scores[k]:
+                avg_ndcg_scores[k] = sum(ndcg_scores[k]) / len(ndcg_scores[k])
+            else:
+                avg_ndcg_scores[k] = 0.0
+        
+        # Print individual nDCG scores following standard IR practices
+        print(f"\nEvaluated {n_queries} queries (Hierarchical Taxonomic Relevance):")
+        for k, score in avg_ndcg_scores.items():
+            print(f"nDCG@{k}: {score:.4f}")
+        
+        # Return primary k value as main metric
+        primary_ndcg = avg_ndcg_scores.get(self.primary_k, 0.0)
+        
+        # No training loss for evaluation
+        return 0.0, primary_ndcg
+
+    def _build_species_taxonomy_map_from_metadata(self, metadata_df: pd.DataFrame):
+        """
+        Build a mapping from species name to taxonomic information using the metadata DataFrame.
+        """
+        self.species_to_taxonomy = {}
+        
+        # Build species to taxonomy mapping from the metadata
+        for _, row in metadata_df.iterrows():
+            species = row.get('species', '')
+            if species:
+                genus = row.get('genus', '')
+                subfamily = row.get('subfamily', '')
+                
+                # Store the taxonomic information for this species
+                self.species_to_taxonomy[species] = {
+                    'genus': genus,
+                    'subfamily': subfamily
+                }
         
     def evaluate(self, model, data_loader, device: str) -> Tuple[float, float]:
         """

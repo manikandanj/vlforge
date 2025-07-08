@@ -2,6 +2,8 @@ from tqdm import tqdm
 from typing import List, Tuple, Dict, Any
 from .base import BaseEvaluator
 from PIL import Image
+import numpy as np
+import pandas as pd
 
 
 class RecallAtKEvaluator(BaseEvaluator):
@@ -79,6 +81,72 @@ class RecallAtKEvaluator(BaseEvaluator):
             predictions.append(ranked_results)
             
         return predictions
+
+    def evaluate_with_embeddings(self, query_embeddings: np.ndarray, query_metadata: pd.DataFrame,
+                               database_embeddings: np.ndarray, database_metadata: pd.DataFrame,
+                               device: str) -> Tuple[float, float]:
+        """
+        Evaluate using pre-computed embeddings with image-to-image similarity.
+        
+        Args:
+            query_embeddings: (n_queries, embedding_dim) array
+            query_metadata: DataFrame with metadata for query images
+            database_embeddings: (n_database, embedding_dim) array  
+            database_metadata: DataFrame with metadata for database images
+            device: Device string (for compatibility)
+            
+        Returns:
+            Tuple of (loss, average_recall)
+        """
+        recall_scores = {k: [] for k in self.k_values}
+        
+        # Limit number of queries if n_samples is specified
+        n_queries = min(self.n_samples, len(query_embeddings)) if self.n_samples else len(query_embeddings)
+        
+        # Get all species in database for counting relevant items
+        database_species = database_metadata['species'].tolist()
+        
+        # Calculate similarities for all queries at once
+        similarities = self.get_image_to_image_similarities(query_embeddings[:n_queries], database_embeddings)
+        
+        query_iterator = range(n_queries)
+        if self.show_progress:
+            query_iterator = tqdm(query_iterator, desc="Recall@K Evaluation (Image-to-Image)")
+        
+        for query_idx in query_iterator:
+            query_species = query_metadata.iloc[query_idx]['species']
+            query_similarities = similarities[query_idx]
+            
+            # Sort database by similarity descending
+            sorted_indices = np.argsort(query_similarities)[::-1]
+            ranked_species = [database_metadata.iloc[idx]['species'] for idx in sorted_indices]
+            
+            # Calculate the number of relevant items in the database for this species
+            true_relevant_count = sum(1 for species in database_species if species == query_species)
+            
+            # Calculate recall@k for each k value
+            for k in self.k_values:
+                recall_k = self.recall_at_k(query_species, ranked_species, database_species, k, true_relevant_count)
+                recall_scores[k].append(recall_k)
+        
+        # Calculate average recall scores
+        avg_recall_scores = {}
+        for k in self.k_values:
+            if recall_scores[k]:
+                avg_recall_scores[k] = sum(recall_scores[k]) / len(recall_scores[k])
+            else:
+                avg_recall_scores[k] = 0.0
+                
+        # Print individual recall scores
+        print(f"\nEvaluated {n_queries} queries:")
+        for k, score in avg_recall_scores.items():
+            print(f"Recall@{k}: {score:.4f}")
+            
+        # Return average of all recall scores as the main metric
+        overall_recall = sum(avg_recall_scores.values()) / len(avg_recall_scores) if avg_recall_scores else 0.0
+        
+        # No training loss for evaluation
+        return 0.0, overall_recall
         
     def evaluate(self, model, data_loader, device: str) -> Tuple[float, float]:
         """

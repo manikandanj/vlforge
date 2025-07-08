@@ -5,3 +5,4 @@ __pycache__/
 *$py.class
 /demo_similarity_results
 /metrics
+/storage

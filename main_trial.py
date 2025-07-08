@@ -299,9 +299,9 @@ def calculate_all_metrics(query_info: dict, results_df: pd.DataFrame, database_s
     return metrics
 
 
-def create_demo_visualization(query_info, results_df, data_loader, metrics, database_stats, save_path="demo_similarity_results.png"):
+def create_sample_visualization(query_info, results_df, data_loader, metrics, database_stats, save_path="demo_similarity_results.png"):
     """
-    Create a captivating visualization showing query image and top similar images
+    Create a visualization showing query image and top similar images
     """
     # Set up the figure with a clean layout
     fig = plt.figure(figsize=(20, 12))
@@ -589,7 +589,7 @@ def main(cfg: DictConfig) -> None:
             else:
                 save_path = os.path.join(output_dir, f"{unique_id}.png")
             try:
-                create_demo_visualization(query_image_info, results_df, data_loader, metrics, database_stats, save_path=save_path)
+                create_sample_visualization(query_image_info, results_df, data_loader, metrics, database_stats, save_path=save_path)
                 print(f"Saved visualization for query {query_image_info['unique_id']} to {save_path}")
             except Exception as e:
                 print(f"Error creating visualization for {query_image_info['unique_id']}: {e}")
