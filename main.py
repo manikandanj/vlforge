@@ -6,6 +6,7 @@ import numpy as np
 from pathlib import Path
 import glob
 from utils.common import set_seed
+from utils.logging_config import setup_logging, get_logger
 from embeddings import EmbeddingStorage, generate_embeddings_batched
 
 
@@ -24,31 +25,33 @@ def find_most_recent_embedding_file(storage_dir: str) -> str:
     h5_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
     
     most_recent = h5_files[0]
-    print(f"Found {len(h5_files)} embedding file(s), using most recent: {most_recent.name}")
+    logger = get_logger()
+    logger.info(f"Found {len(h5_files)} embedding file(s), using most recent: {most_recent.name}")
     return str(most_recent)
 
 
 @hydra.main(config_path="conf", config_name="experiment", version_base="1.1")
 def main(cfg: DictConfig) -> None:
 
+    # Set up logging
+    logger = setup_logging(cfg.experiment.name)
+    
     set_seed(cfg.experiment.seed)
-    print(f"Starting {cfg.experiment.name}")
-    print(f"Mode: {cfg.mode}")
+    logger.info(f"Starting experiment: {cfg.experiment.name}")
+    logger.info(f"Mode: {cfg.mode}")
     device = torch.device(cfg.experiment.device if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+    logger.info(f"Device: {device}")
 
     if cfg.mode == "embed":
         # EMBED MODE: Generate and save embeddings
-        print("\n" + "="*60)
-        print("EMBEDDING GENERATION MODE")
-        print("="*60)
+        logger.info("EMBEDDING GENERATION MODE")
         
         # Initialize model and data loader
         model = instantiate(cfg.model)
-        print(f"Model info: {model.get_model_info()}")
+        logger.info(f"Model: {model.get_model_info()}")
 
         data_loader = instantiate(cfg.data)
-        print(f"Dataset info: {data_loader.get_dataset_info()}")
+        logger.info(f"Dataset: {data_loader.get_dataset_info()}")
         
         # Generate embeddings in batches
         embeddings, metadata, generated_filepath = generate_embeddings_batched(
@@ -76,19 +79,17 @@ def main(cfg: DictConfig) -> None:
             overwrite=True
         )
         
-        print(f"Embeddings saved to: {final_filepath}")
-        print("Run with mode='eval' to evaluate using these embeddings")
+        logger.info(f"Embeddings saved to: {final_filepath}")
+        logger.info("Run with mode='eval' to evaluate using these embeddings")
 
     elif cfg.mode == "eval":
         # EVAL MODE: Load embeddings and run evaluation
-        print("\n" + "="*60)
-        print("EVALUATION MODE (with pre-computed embeddings)")
-        print("="*60)
+        logger.info("EVALUATION MODE (with pre-computed embeddings)")
         
         # Determine which embedding file to use
         if cfg.evaluation.embedding_file:
             embedding_file_path = cfg.evaluation.embedding_file
-            print(f"Using specified embedding file: {embedding_file_path}")
+            logger.info(f"Using specified embedding file: {embedding_file_path}")
         else:
             embedding_file_path = find_most_recent_embedding_file(cfg.embeddings.storage_dir)
         
@@ -96,11 +97,11 @@ def main(cfg: DictConfig) -> None:
         storage = EmbeddingStorage(embedding_file_path)
         embeddings, metadata_df, attributes = storage.load_embeddings()
         
-        print(f"Loaded embeddings generated with model: {attributes.get('model_name', 'Unknown')}")
-        print(f"Generated on: {attributes.get('creation_timestamp', 'Unknown')}")
+        logger.info(f"Loaded embeddings from model: {attributes.get('model_name', 'Unknown')}")
+        logger.info(f"Generated on: {attributes.get('creation_timestamp', 'Unknown')}")
         
         # Split into query and database sets
-        print("\nSplitting data into query and database sets...")
+        logger.info("Splitting data into query and database sets...")
         np.random.seed(cfg.experiment.seed)
         n_total = len(embeddings)
         query_size = max(1, int(n_total * cfg.evaluation.split.query_ratio))
@@ -115,21 +116,18 @@ def main(cfg: DictConfig) -> None:
         database_embeddings = embeddings[database_indices]
         database_metadata = metadata_df.iloc[database_indices].reset_index(drop=True)
         
-        print(f"Query set size: {len(query_embeddings)}")
-        print(f"Database set size: {len(database_embeddings)}")
+        logger.info(f"Query set: {len(query_embeddings)} samples")
+        logger.info(f"Database set: {len(database_embeddings)} samples")
         
         # Initialize model (needed for evaluator interface compatibility)
         model = instantiate(cfg.model)
-        print(f"Model info: {model.get_model_info()}")
-
         data_loader = instantiate(cfg.data)
-        print(f"Dataset info: {data_loader.get_dataset_info()}")
         
         # Run evaluators
         results = {}
         for i, ev_cfg in enumerate(cfg.evaluators, 1):
             evaluator = instantiate(ev_cfg)
-            print(f"\nEvaluation info: {evaluator.get_evaluator_info()}")
+            logger.info(f"Running evaluator: {evaluator.get_evaluator_info()}")
             
             # Pass embeddings and metadata to evaluator
             loss, metric = evaluator.evaluate_with_embeddings(
@@ -141,19 +139,18 @@ def main(cfg: DictConfig) -> None:
             )
             results[evaluator.evaluator_name] = {"loss": loss, "metric": metric}
               
-        print("\n" + "="*60)
-        print("EVALUATION RESULTS")
-        print("="*60)
+        logger.info("EVALUATION RESULTS:")
         for eval_name, result in results.items():
-            print(f"{eval_name:25}: metric={result['metric']:.4f}")
+            logger.info(f"  {eval_name}: {result['metric']:.4f}")
     
     elif cfg.mode == "train":
-        print("Training mode not implemented yet")
+        logger.warning("Training mode not implemented yet")
     
     else:
         raise ValueError(f"Unknown mode: {cfg.mode}. Supported modes: embed, eval, train")
 
-    print(f"Completed {cfg.experiment.name}")
+    logger.info(f"Completed experiment: {cfg.experiment.name}")
+    logger.info("="*80)
 
 
 if __name__ == "__main__":

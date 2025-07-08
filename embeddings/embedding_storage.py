@@ -6,6 +6,7 @@ from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
 import torch
 import re
+from utils.logging_config import get_logger
 
 
 class EmbeddingStorage:
@@ -97,9 +98,9 @@ class EmbeddingStorage:
         # Convert metadata list to structured format
         metadata_df = pd.DataFrame(metadata_list)
         
-        print(f"Saving {len(embeddings)} embeddings to {self.file_path}")
-        print(f"Embedding dimension: {embeddings.shape[1]}")
-        print(f"Metadata fields: {list(metadata_df.columns)}")
+        logger = get_logger()
+        logger.info(f"Saving {len(embeddings)} embeddings to {self.file_path}")
+        logger.info(f"Embedding dimension: {embeddings.shape[1]}")
         
         with h5py.File(self.file_path, 'w') as f:
             # Store embeddings
@@ -133,8 +134,7 @@ class EmbeddingStorage:
             
             attrs_group.attrs['dataset_info'] = str(dataset_info).encode('utf-8')
             
-        print(f"Successfully saved embeddings to {self.file_path}")
-        print(f"Hydra-compatible timestamp: {hydra_timestamp}")
+        logger.info(f"Successfully saved embeddings to {self.file_path}")
         
     def load_embeddings(self) -> Tuple[np.ndarray, pd.DataFrame, Dict]:
         """
@@ -146,7 +146,8 @@ class EmbeddingStorage:
         if not self.file_path.exists():
             raise FileNotFoundError(f"Embedding file {self.file_path} not found")
             
-        print(f"Loading embeddings from {self.file_path}")
+        logger = get_logger()
+        logger.info(f"Loading embeddings from {self.file_path}")
         
         with h5py.File(self.file_path, 'r') as f:
             # Load embeddings
@@ -177,9 +178,7 @@ class EmbeddingStorage:
                         value = value.decode('utf-8')
                     attributes[key] = value
             
-        print(f"Loaded {len(embeddings)} embeddings with {embeddings.shape[1]} dimensions")
-        print(f"Metadata fields: {list(metadata_df.columns)}")
-        print(f"Generated: {attributes.get('creation_timestamp', 'Unknown')}")
+        logger.info(f"Loaded {len(embeddings)} embeddings with {embeddings.shape[1]} dimensions")
         
         return embeddings, metadata_df, attributes
     
@@ -227,7 +226,8 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
     Returns:
         Tuple of (embeddings_array, metadata_list, generated_filepath)
     """
-    print("Generating embeddings in batches...")
+    logger = get_logger()
+    logger.info("Generating embeddings in batches...")
     
     all_embeddings = []
     all_metadata = []
@@ -237,7 +237,8 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
         if not images:
             continue
             
-        print(f"Processing batch {batch_idx + 1}: {len(images)} images")
+        if batch_idx % 10 == 0:  # Log every 10th batch to reduce clutter
+            logger.info(f"Processing batch {batch_idx + 1}: {len(images)} images")
         
         # Generate embeddings for this batch
         with torch.no_grad():
@@ -256,7 +257,6 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
         all_metadata.extend(metadata_batch)
         
         total_processed += len(images)
-        print(f"  Processed {total_processed} images total")
         
         # Check if we've reached max_samples
         if max_samples and total_processed >= max_samples:
@@ -265,7 +265,8 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
     # Combine all embeddings
     if all_embeddings:
         combined_embeddings = np.vstack(all_embeddings)
-        print(f"Generated embeddings shape: {combined_embeddings.shape}")
+        logger.info(f"Generated embeddings shape: {combined_embeddings.shape}")
+        logger.info(f"Total processed: {total_processed} images")
         
         # Generate filename if auto_filename is enabled
         generated_filepath = ""
@@ -275,7 +276,6 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
                 dataset_info=data_loader.get_dataset_info(),
                 base_dir=base_storage_dir
             )
-            print(f"Auto-generated filename: {generated_filepath}")
         
         return combined_embeddings, all_metadata, generated_filepath
     else:

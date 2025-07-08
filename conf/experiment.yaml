@@ -6,7 +6,7 @@ hydra:
     chdir: false 
     
 experiment:
-  name: "butterfly_eval_initial_project_setup_full_nymphalidae_dataset"
+  name: "embed_finetuned_bioclip_best_img2img_20250707"
   seed: 42
   device: "cuda"
 
@@ -37,10 +37,18 @@ evaluation:
     query_ratio: 0.2  # 20% for queries, 80% for database
     num_queries: 1    # Number of queries to evaluate (for demo/testing)
 
+# Comment out base BioCLIP model
+# model:
+#   _target_: "models.bioclip.BioCLIPModel"
+#   device: "cuda"
+#   model_name: "hf-hub:imageomics/bioclip"
+
+# Fine-tuned BioCLIP model configuration
 model:
-  _target_: "models.bioclip.BioCLIPModel"
+  _target_: "models.finetuned_bioclip.FineTunedBioCLIPModel"
   device: "cuda"
-  model_name: "hf-hub:imageomics/bioclip"
+  checkpoint_path: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/best_img2img_20250707.pt"
+  base_model_name: "hf-hub:imageomics/bioclip"
 
 # Comment other model and uncomment this one to use OpenAI CLIP
 # model:

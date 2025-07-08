@@ -19,8 +19,7 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
         self.group_dir = self.base_dir / self.group
         self.metadata_path = self.metadata_dir / self.metadata_file
         self.img_dir = self.group_dir / "images"
-        print(f"img_dir: {self.img_dir}")
-        print(f"metadata_path: {self.metadata_path}")
+        # Dataset paths logged via main logger in data_loader.get_dataset_info()
         # Load metadata
         self.df_meta = pd.read_csv(self.metadata_path)
         self._labels = sorted(self.df_meta["species"].dropna().unique())
@@ -94,7 +93,11 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
             
         return metadata_list
     
-    def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str], List[str]], None, None]:
+    def get_batch_data(self, n_samples: Optional[int] = None) -> Generator[Tuple[List[Image.Image], List[str], List[str]], None, None]:
+        # If n_samples is None, process all available samples
+        if n_samples is None:
+            n_samples = len(self.df_meta)
+        
         for idx_start in range(0, n_samples, self.batch_size):
             idx_end = min(idx_start + self.batch_size, n_samples)
             df_batch = self.df_meta[idx_start:idx_end]
@@ -110,10 +113,9 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
                         images.append(img)
                         labels.append(row["species"])
                         unique_ids.append(row["mask_name"])
-                    else:
-                        print(f"Warning: Image not found: {row['mask_name']}")
+                    # Skip missing images silently - they're tracked in dataset stats
                 except Exception as e:
-                    print(f"Warning: Error loading image {row['mask_name']}: {e}")
+                    # Skip problematic images silently - errors tracked in dataset stats
                     continue
             
             if images: 
