@@ -33,8 +33,14 @@ def find_most_recent_embedding_file(storage_dir: str) -> str:
 @hydra.main(config_path="conf", config_name="experiment", version_base="1.1")
 def main(cfg: DictConfig) -> None:
 
-    # Set up logging
-    logger = setup_logging(cfg.experiment.name)
+    # Set up logging with configuration from config file
+    log_config = cfg.get('logging', {})
+    logger = setup_logging(
+        experiment_name=cfg.experiment.name,
+        outputs_dir=log_config.get('outputs_dir', 'outputs'),
+        log_filename=log_config.get('log_filename', None),
+        auto_filename=log_config.get('auto_filename', False)
+    )
     
     set_seed(cfg.experiment.seed)
     logger.info(f"Starting experiment: {cfg.experiment.name}")
@@ -47,13 +53,20 @@ def main(cfg: DictConfig) -> None:
         logger.info("EMBEDDING GENERATION MODE")
         
         # Initialize model and data loader
+        logger.info("Initializing model...")
         model = instantiate(cfg.model)
         logger.info(f"Model: {model.get_model_info()}")
 
-        data_loader = instantiate(cfg.data)
-        logger.info(f"Dataset: {data_loader.get_dataset_info()}")
+        logger.info("Initializing data loader...")
+        try:
+            data_loader = instantiate(cfg.data)
+            logger.info(f"Dataset: {data_loader.get_dataset_info()}")
+        except Exception as e:
+            logger.error(f"Failed to initialize data loader: {str(e)}")
+            raise
         
         # Generate embeddings in batches
+        logger.info("Starting embedding generation...")
         embeddings, metadata, generated_filepath = generate_embeddings_batched(
             model=model, 
             data_loader=data_loader, 
@@ -70,6 +83,7 @@ def main(cfg: DictConfig) -> None:
             final_filepath = generated_filepath
         
         # Save embeddings to HDF5
+        logger.info("Saving embeddings to storage...")
         storage = EmbeddingStorage(final_filepath)
         storage.save_embeddings(
             embeddings=embeddings,

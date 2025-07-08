@@ -3,16 +3,19 @@ defaults:
 
 hydra:
   job:
-    chdir: false 
+    chdir: false
+  run:
+    dir: "/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/logs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}"
     
 experiment:
   name: "embed_finetuned_bioclip_best_img2img_20250707"
   seed: 42
   device: "cuda"
 
-# Logging configuration
+
+# Logging configuration - let Hydra handle directory structure
 logging:
-  outputs_dir: "outputs"
+  outputs_dir: null  # null = use Hydra's automatic directory structure
   log_filename: null  # null = use "main.log", specify filename for custom name
   auto_filename: false  # true = auto-generate filename with timestamp
 
@@ -24,7 +27,7 @@ mode: "embed"  # Change to "eval" to run evaluation with pre-computed embeddings
 # Embedding configuration
 embeddings:
   # Storage configuration
-  storage_dir: "storage"  # Directory for H5 files
+  storage_dir: "/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/storage"  # Directory for H5 files
   
   # Filename configuration
   auto_filename: true  # Auto-generate descriptive filenames
@@ -53,7 +56,7 @@ evaluation:
 model:
   _target_: "models.finetuned_bioclip.FineTunedBioCLIPModel"
   device: "cuda"
-  checkpoint_path: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/best_img2img_20250707.pt"
+  checkpoint_path: "/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/checkpoint_files/best_img2img_20250707.pt"
   base_model_name: "hf-hub:imageomics/bioclip"
 
 # Comment other model and uncomment this one to use OpenAI CLIP
@@ -72,12 +75,10 @@ model:
 
 data:
   _target_: "dataloaders.butterfly_dataset_loader.ButterflyDatasetDataLoader"
-  base_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data"
-  metadata_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data\\nymphalidae_whole_specimen-v240606\\metadata"
-  # base_dir: "/blue/arthur.porto-biocosmos/data/datasets"
-  # metadata_dir: "/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v240606/metadata"
-  group: "nymphalidae_whole_specimen-v240606"
-  metadata_file: "data_meta-nymphalidae_whole_specimen-v240606_subset.csv"
+  base_dir: "/blue/arthur.porto-biocosmos/data/datasets"
+  metadata_dir: "/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v250613/metadata"
+  group: "nymphalidae_whole_specimen-v250613"
+  metadata_file: "data_meta-nymphalidae_whole_specimen-v250613.csv"
   batch_size: 128
 
 # Evaluation metrics - only used in eval mode

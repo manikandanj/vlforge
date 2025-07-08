@@ -3,6 +3,7 @@ from PIL import Image
 from pathlib import Path
 from typing import List, Tuple, Generator, Optional, Dict, Any
 from .base import BaseDataLoader
+from utils.logging_config import get_logger
 
 
 class ButterflyDatasetDataLoader(BaseDataLoader):
@@ -16,34 +17,70 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
         super().__init__(batch_size=batch_size, **kwargs)
     
     def _setup_data(self):
+        logger = get_logger()
+        logger.info("Setting up butterfly dataset data loader...")
+        
         self.group_dir = self.base_dir / self.group
         self.metadata_path = self.metadata_dir / self.metadata_file
         self.img_dir = self.group_dir / "images"
-        # Dataset paths logged via main logger in data_loader.get_dataset_info()
+        
+        logger.info(f"Metadata path: {self.metadata_path}")
+        
+        # Check if metadata file exists
+        if not self.metadata_path.exists():
+            logger.error(f"Metadata file does not exist: {self.metadata_path}")
+            raise FileNotFoundError(f"Metadata file does not exist: {self.metadata_path}")
+        
         # Load metadata
+        logger.info("Loading metadata CSV file...")
         self.df_meta = pd.read_csv(self.metadata_path)
+        logger.info(f"Successfully loaded metadata: {len(self.df_meta)} rows")
+        logger.info(f"Available columns: {list(self.df_meta.columns)}")
+        
         self._labels = sorted(self.df_meta["species"].dropna().unique())
+        logger.info(f"Found {len(self._labels)} unique species")
         
         # Calculate frequency maps
+        logger.info("Calculating frequency maps...")
         self._calculate_frequency_maps()
+        logger.info("Dataset setup completed successfully")
 
     def _calculate_frequency_maps(self):
-        """Calculate frequency maps for species, genus, and subfamily"""
+        """Calculate frequency maps for available taxonomic levels"""
         self.species_counts = {}
         self.genus_counts = {}
         self.subfamily_counts = {}
 
-        for _, row in self.df_meta.iterrows():
-            species = row['species']
-            genus = row['genus']
-            subfamily = row['subfamily']
+        # Check which columns are available
+        has_genus = 'genus' in self.df_meta.columns
+        has_subfamily = 'subfamily' in self.df_meta.columns
+        
+        logger = get_logger()
+        if not has_genus:
+            logger.warning("'genus' column not found in metadata. Genus frequency map will be empty.")
+        if not has_subfamily:
+            logger.warning("'subfamily' column not found in metadata. Subfamily frequency map will be empty.")
 
-            self.species_counts[species] = self.species_counts.get(species, 0) + 1
-            self.genus_counts[genus] = self.genus_counts.get(genus, 0) + 1
-            self.subfamily_counts[subfamily] = self.subfamily_counts.get(subfamily, 0) + 1
+        for _, row in self.df_meta.iterrows():
+            # Species should always be available
+            species = row.get('species', '')
+            if species:
+                self.species_counts[species] = self.species_counts.get(species, 0) + 1
+            
+            # Handle genus if available
+            if has_genus:
+                genus = row.get('genus', '')
+                if genus:
+                    self.genus_counts[genus] = self.genus_counts.get(genus, 0) + 1
+            
+            # Handle subfamily if available  
+            if has_subfamily:
+                subfamily = row.get('subfamily', '')
+                if subfamily:
+                    self.subfamily_counts[subfamily] = self.subfamily_counts.get(subfamily, 0) + 1
 
     def get_frequency_maps(self) -> Optional[Dict[str, Dict[str, int]]]:
-        """Get frequency maps for species, genus, and subfamily"""
+        """Get frequency maps for available taxonomic levels"""
         return {
             "species": self.species_counts,
             "genus": self.genus_counts,
@@ -69,19 +106,21 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
             
             if not matching_rows.empty:
                 row = matching_rows.iloc[0]  # Take first match
+                
+                # Start with core fields, handling missing columns gracefully
                 metadata = {
                     "species": row.get("species", ""),
-                    "genus": row.get("genus", ""),
-                    "subfamily": row.get("subfamily", ""),
+                    "genus": row.get("genus", ""),  # Will be empty string if column doesn't exist
+                    "subfamily": row.get("subfamily", ""),  # Will be empty string if column doesn't exist
                     "mask_name": row.get("mask_name", ""),
-                    # Add any other fields that might be useful
                 }
+                
                 # Add any additional fields that exist in the dataframe
                 for col in self.df_meta.columns:
                     if col not in metadata:
                         metadata[col] = row.get(col, "")
             else:
-                # Return empty metadata if not found
+                # Return minimal metadata if not found
                 metadata = {
                     "species": "",
                     "genus": "",

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=butterfly_project_setup
-#SBATCH --partition=gpu
+#SBATCH --partition=hpg-b200
 #SBATCH --gres=gpu:1
 #SBATCH --mem=8gb
 #SBATCH --time=1:00:00
@@ -22,7 +22,9 @@ module load conda
 eval "$(conda shell.bash hook)"
 
 # activate conda only for installing packages
-conda env create -f ${CONDA_CONFIG_FILE} -p ${CONDA_ENV_PATH} -y
+echo "Starting environment creation at $(date)"
+conda env create -f ${CONDA_CONFIG_FILE} -p ${CONDA_ENV_PATH} -v -y
+echo "Environment creation completed at $(date)"
 conda activate ${CONDA_ENV_PATH}
 
 # Verify GPU setup
