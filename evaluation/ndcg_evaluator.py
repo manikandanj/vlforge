@@ -2,21 +2,31 @@ from tqdm import tqdm
 from typing import List, Tuple, Dict, Any
 from .base import BaseEvaluator
 from PIL import Image
-from sklearn.metrics import ndcg_score
+import numpy as np
+import pandas as pd
 
 
 class NDCGEvaluator(BaseEvaluator):
     """
     Evaluator that calculates nDCG (Normalized Discounted Cumulative Gain) 
-    using taxonomic hierarchy-based relevance scoring.
-    Uses scikit-learn's ndcg_score for robust and simple implementation.
+    using hierarchical taxonomic relevance scoring with exponential gain.
+    
+    Relevance levels:
+    - Species match: 3 (Highly Relevant)
+    - Genus match: 2 (Relevant)
+    - Subfamily match: 1 (Partially Relevant)
+    - No match: 0 (Irrelevant)
+    
+    Uses exponential gain: (2^relevance - 1) / log2(i + 2)
+    Calculates mean nDCG across all queries and reports both individual k-values and overall mean.
     """
     
-    def __init__(self, n_samples: int = 200, metrics: List[str] = None, 
-                 k_values: List[int] = None, show_progress: bool = True, **kwargs):
-        self.k_values = k_values or [5, 10, 50]
+    def __init__(self, n_samples: int = 200, k_values: List[int] = None, 
+                 primary_k: int = None, show_progress: bool = True, **kwargs):
+        self.k_values = k_values or [1, 5, 15]
+        self.primary_k = primary_k or max(self.k_values)  # Use highest k as primary by default
         metric_names = [f"ndcg@{k}" for k in self.k_values]
-        super().__init__(n_samples=n_samples, metrics=metrics or metric_names, 
+        super().__init__(n_samples=n_samples, metrics=metric_names, 
                         show_progress=show_progress, **kwargs)
         self.show_progress = show_progress
         self.species_to_taxonomy = {}  # Cache for species -> (genus, subfamily) mapping
@@ -27,13 +37,23 @@ class NDCGEvaluator(BaseEvaluator):
         """
         self.species_to_taxonomy = {}
         
-        # Access the metadata DataFrame from the butterfly data loader
-        if hasattr(data_loader, 'df_meta'):
-            df_meta = data_loader.df_meta
-            for _, row in df_meta.iterrows():
-                species = row['species']
-                genus = row['genus'] if 'genus' in row else ""
-                subfamily = row['subfamily'] if 'subfamily' in row else ""
+        # Get all unique labels (species) from the data loader
+        all_species = data_loader.get_labels()
+        
+        # For butterfly dataset, we need to get some sample unique_ids to build the taxonomy map
+        # Sample a small batch to get representative metadata
+        sample_metadata = []
+        for images, labels, unique_ids in data_loader.get_batch_data(n_samples=100):
+            metadata_batch = data_loader.get_metadata_for_ids(unique_ids)
+            sample_metadata.extend(metadata_batch)
+            break  # Just need one batch to build the map
+        
+        # Build species to taxonomy mapping from the metadata
+        for metadata in sample_metadata:
+            species = metadata.get('species', '')
+            if species:
+                genus = metadata.get('genus', '')
+                subfamily = metadata.get('subfamily', '')
                 
                 # Store the taxonomic information for this species
                 self.species_to_taxonomy[species] = {
@@ -71,6 +91,48 @@ class NDCGEvaluator(BaseEvaluator):
             
         return 0
         
+    def ndcg_at_k(self, query_species: str, ranked_results: List[Tuple[str, float]], k: int) -> float:
+        """
+        Calculate nDCG@k using hierarchical relevance scoring (multi-level taxonomy).
+        Uses exponential gain: (2^relevance - 1) / log2(i + 2)
+        
+        Args:
+            query_species: True species of the query image
+            ranked_results: List of (species, similarity_score) tuples in ranked order
+            k: Number of top results to consider
+        
+        Returns:
+            nDCG@k score (0.0 to 1.0)
+        """
+        if k <= 0 or len(ranked_results) == 0:
+            return 0.0
+        
+        # Get relevance scores for top-k results
+        relevance_scores = []
+        prediction_scores = []
+        
+        for i, (species, similarity_score) in enumerate(ranked_results[:k]):
+            relevance = self.get_relevance_score(query_species, species)
+            relevance_scores.append(relevance)
+            prediction_scores.append(similarity_score)
+        
+        # Calculate DCG using exponential gain
+        dcg = 0.0
+        for i, relevance in enumerate(relevance_scores):
+            # Using exponential gain instead of linear gain
+            dcg += (2**relevance - 1) / np.log2(i + 2)
+            
+        # Calculate ideal DCG (best possible ordering)
+        ideal_relevance = sorted(relevance_scores, reverse=True)
+        idcg = 0.0
+        for i, relevance in enumerate(ideal_relevance):
+            # Using exponential gain instead of linear gain
+            idcg += (2**relevance - 1) / np.log2(i + 2)
+        
+        ndcg = dcg / idcg if idcg > 0 else 0.0
+        
+        return ndcg
+        
     def get_ranked_predictions(self, model, query_images: List[Image.Image], 
                              candidate_labels: List[str]) -> List[List[Tuple[str, float]]]:
         """
@@ -99,11 +161,98 @@ class NDCGEvaluator(BaseEvaluator):
             predictions.append(ranked_results)
             
         return predictions
+
+    def evaluate_with_embeddings(self, query_embeddings: np.ndarray, query_metadata: pd.DataFrame,
+                               database_embeddings: np.ndarray, database_metadata: pd.DataFrame,
+                               device: str) -> Tuple[float, float]:
+        """
+        Evaluate using pre-computed embeddings with image-to-image similarity.
+        
+        Args:
+            query_embeddings: (n_queries, embedding_dim) array
+            query_metadata: DataFrame with metadata for query images
+            database_embeddings: (n_database, embedding_dim) array  
+            database_metadata: DataFrame with metadata for database images
+            device: Device string (for compatibility)
+            
+        Returns:
+            Tuple of (loss, primary_ndcg)
+        """
+        # Build species to taxonomy mapping from metadata
+        self._build_species_taxonomy_map_from_metadata(database_metadata)
+        
+        ndcg_scores = {k: [] for k in self.k_values}
+        
+        # Limit number of queries if n_samples is specified
+        n_queries = min(self.n_samples, len(query_embeddings)) if self.n_samples else len(query_embeddings)
+        
+        # Calculate similarities for all queries at once
+        similarities = self.get_image_to_image_similarities(query_embeddings[:n_queries], database_embeddings)
+        
+        query_iterator = range(n_queries)
+        if self.show_progress:
+            query_iterator = tqdm(query_iterator, desc="nDCG Evaluation (Image-to-Image, Hierarchical)")
+        
+        for query_idx in query_iterator:
+            query_species = query_metadata.iloc[query_idx]['species']
+            query_similarities = similarities[query_idx]
+            
+            # Sort database by similarity descending and create ranked results
+            sorted_indices = np.argsort(query_similarities)[::-1]
+            ranked_results = []
+            for idx in sorted_indices:
+                species = database_metadata.iloc[idx]['species']
+                similarity_score = query_similarities[idx]
+                ranked_results.append((species, similarity_score))
+            
+            # Calculate nDCG for each k value using hierarchical implementation
+            for k in self.k_values:
+                ndcg_k = self.ndcg_at_k(query_species, ranked_results, k)
+                ndcg_scores[k].append(ndcg_k)
+        
+        # Calculate mean nDCG scores across all queries
+        avg_ndcg_scores = {}
+        for k in self.k_values:
+            if ndcg_scores[k]:
+                avg_ndcg_scores[k] = sum(ndcg_scores[k]) / len(ndcg_scores[k])
+            else:
+                avg_ndcg_scores[k] = 0.0
+        
+        # Print individual nDCG scores following standard IR practices
+        print(f"\nEvaluated {n_queries} queries (Hierarchical Taxonomic Relevance):")
+        for k, score in avg_ndcg_scores.items():
+            print(f"nDCG@{k}: {score:.4f}")
+        
+        # Return primary k value as main metric
+        primary_ndcg = avg_ndcg_scores.get(self.primary_k, 0.0)
+        
+        # No training loss for evaluation
+        return 0.0, primary_ndcg
+
+    def _build_species_taxonomy_map_from_metadata(self, metadata_df: pd.DataFrame):
+        """
+        Build a mapping from species name to taxonomic information using the metadata DataFrame.
+        """
+        self.species_to_taxonomy = {}
+        
+        # Build species to taxonomy mapping from the metadata
+        for _, row in metadata_df.iterrows():
+            species = row.get('species', '')
+            if species:
+                genus = row.get('genus', '')
+                subfamily = row.get('subfamily', '')
+                
+                # Store the taxonomic information for this species
+                self.species_to_taxonomy[species] = {
+                    'genus': genus,
+                    'subfamily': subfamily
+                }
         
     def evaluate(self, model, data_loader, device: str) -> Tuple[float, float]:
         """
-        Evaluate model using nDCG metrics.
-        Returns (average_loss, average_ndcg) where average_ndcg is the mean of all k values.
+        Evaluate model using hierarchical nDCG metrics with exponential gain.
+        Returns (average_loss, primary_ndcg) where primary_ndcg is the mean nDCG@primary_k across all queries.
+        Individual k-values are reported separately following standard IR practices.
         """
         # Build species to taxonomy mapping from metadata
         self._build_species_taxonomy_map(data_loader)
@@ -113,11 +262,11 @@ class NDCGEvaluator(BaseEvaluator):
         
         data_iter = data_loader.get_batch_data(self.n_samples)
         if self.show_progress:
-            data_iter = tqdm(data_iter, desc="nDCG Evaluation")
+            data_iter = tqdm(data_iter, desc="nDCG Evaluation (Hierarchical)")
             
         total_queries = 0
         
-        for query_images, true_labels in data_iter:
+        for query_images, true_labels, unique_ids in data_iter:
             if not query_images:
                 continue
                 
@@ -127,25 +276,14 @@ class NDCGEvaluator(BaseEvaluator):
             for i, (query_image, true_label) in enumerate(zip(query_images, true_labels)):
                 ranked_results = batch_predictions[i]
                 
-                # Calculate relevance scores and prediction scores
-                relevance_scores = []
-                prediction_scores = []
-                
-                for predicted_label, confidence_score in ranked_results:
-                    relevance_score = self.get_relevance_score(true_label, predicted_label)
-                    relevance_scores.append(relevance_score)
-                    prediction_scores.append(confidence_score)
-                
-                # Calculate nDCG for each k value using scikit-learn
+                # Calculate nDCG for each k value using hierarchical implementation
                 for k in self.k_values:
-                    # sklearn expects shape (n_samples, n_outputs) but we have single query
-                    # so we wrap in lists to make it (1, n_candidates)
-                    ndcg_k = ndcg_score([relevance_scores], [prediction_scores], k=k)
+                    ndcg_k = self.ndcg_at_k(true_label, ranked_results, k)
                     ndcg_scores[k].append(ndcg_k)
                 
                 total_queries += 1
         
-        # Calculate average nDCG scores
+        # Calculate mean nDCG scores across all queries
         avg_ndcg_scores = {}
         for k in self.k_values:
             if ndcg_scores[k]:
@@ -153,19 +291,25 @@ class NDCGEvaluator(BaseEvaluator):
             else:
                 avg_ndcg_scores[k] = 0.0
                 
-        # Print individual nDCG scores
+        # Print individual nDCG scores (mean across queries for each k)
         print(f"\nEvaluated {total_queries} queries:")
+        print("Hierarchical nDCG (exponential gain):")
         for k, score in avg_ndcg_scores.items():
-            print(f"nDCG@{k}: {score:.4f}")
-            
-        # Return average of all nDCG scores as the main metric
-        overall_ndcg = sum(avg_ndcg_scores.values()) / len(avg_ndcg_scores) if avg_ndcg_scores else 0.0
+            print(f"Mean nDCG@{k}: {score:.4f}")
         
+        # Return primary k-value as main metric (standard practice)
+        primary_ndcg = avg_ndcg_scores.get(self.primary_k, 0.0)
+        print(f"Primary metric (nDCG@{self.primary_k}): {primary_ndcg:.4f}")
+            
         # No training loss for evaluation
-        return 0.0, overall_ndcg
+        return 0.0, primary_ndcg
         
     def get_evaluator_info(self) -> Dict[str, Any]:
-        """Override to include k_values information"""
+        """Override to include k_values and implementation details"""
         info = super().get_evaluator_info()
         info["k_values"] = self.k_values
+        info["primary_k"] = self.primary_k
+        info["gain_type"] = "exponential"
+        info["relevance_levels"] = "Species=3, Genus=2, Subfamily=1, None=0"
+        info["mean_calculation"] = "across queries for each k-value separately"
         return info 

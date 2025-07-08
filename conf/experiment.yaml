@@ -6,11 +6,36 @@ hydra:
     chdir: false 
     
 experiment:
-  name: "butterfly_eval_initial_project_setup"
+  name: "butterfly_eval_initial_project_setup_full_nymphalidae_dataset"
   seed: 42
   device: "cuda"
 
-mode: "eval"
+# Mode can be "embed" or "eval"
+# embed: Generate and save embeddings to HDF5 file
+# eval: Load embeddings from HDF5 file and run evaluation
+mode: "embed"  # Change to "eval" to run evaluation with pre-computed embeddings
+
+# Embedding configuration
+embeddings:
+  # Storage configuration
+  storage_dir: "storage"  # Directory for H5 files
+  
+  # Filename configuration
+  auto_filename: true  # Auto-generate descriptive filenames
+  custom_filename: null  # Use specific filename (overrides auto_filename if set)
+  
+  # For embed mode: max samples to process (null for all)
+  max_samples: null
+
+# Evaluation configuration (only used in eval mode)
+evaluation:
+  # Specific embedding file to load (if null, will use most recent in storage_dir)
+  embedding_file: null  # e.g., "storage/2025-07-07_14-30-52_BioCLIP_butterfly_embeddings.h5"
+  
+  # Query/database split configuration
+  split:
+    query_ratio: 0.2  # 20% for queries, 80% for database
+    num_queries: 1    # Number of queries to evaluate (for demo/testing)
 
 model:
   _target_: "models.bioclip.BioCLIPModel"
@@ -19,7 +44,7 @@ model:
 
 # Comment other model and uncomment this one to use OpenAI CLIP
 # model:
-#   _target_: "models.openai_clip.OpenAICLIPModel" 
+#   _target_: "models.openai_clip.OpenAICLIPModel"
 #   device: "cuda"
 #   model_name: "openai/clip-vit-base-patch32"
 
@@ -34,14 +59,34 @@ model:
 data:
   _target_: "dataloaders.butterfly_dataset_loader.ButterflyDatasetDataLoader"
   base_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data"
+  metadata_dir: "C:\\Mani\\learn\\Courses\\BioCosmos\\Butterfly_Project\\Data\\nymphalidae_whole_specimen-v240606\\metadata"
+  # base_dir: "/blue/arthur.porto-biocosmos/data/datasets"
+  # metadata_dir: "/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v240606/metadata"
   group: "nymphalidae_whole_specimen-v240606"
   metadata_file: "data_meta-nymphalidae_whole_specimen-v240606_subset.csv"
   batch_size: 128
 
-#Can add multiple evaluators
+# Evaluation metrics - only used in eval mode
+# Updated to work with pre-computed embeddings and image-to-image similarity
 evaluators:
-  - _target_: "evaluation.zero_shot_evaluator.ZeroShotEvaluator"
-    n_samples: 2000
-    metrics: ["accuracy"]
+  # Binary relevance metrics (species-level matches only)
+  - _target_: "evaluation.precision_at_k_evaluator.PrecisionAtKEvaluator"
+    n_samples: 500
+    k_values: [1, 5, 50]
     show_progress: true
     
+  - _target_: "evaluation.recall_at_k_evaluator.RecallAtKEvaluator"
+    n_samples: 500
+    k_values: [1, 5, 50]
+    show_progress: true
+    
+  - _target_: "evaluation.map_evaluator.mAPEvaluator"
+    n_samples: 500
+    show_progress: true
+    
+  # Hierarchical relevance metrics (multi-level taxonomy with exponential gain)
+  - _target_: "evaluation.ndcg_evaluator.NDCGEvaluator"
+    n_samples: 500
+    k_values: [1, 5, 50]
+    primary_k: 50
+    show_progress: true

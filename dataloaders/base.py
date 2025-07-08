@@ -28,7 +28,20 @@ class BaseDataLoader(ABC):
         pass
     
     @abstractmethod
-    def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str]], None, None]:
+    def get_batch_data(self, n_samples: int) -> Generator[Tuple[List[Image.Image], List[str], List[str]], None, None]:
+        pass
+
+    @abstractmethod
+    def get_metadata_for_ids(self, unique_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get metadata for specific unique IDs
+        
+        Args:
+            unique_ids: List of unique identifiers
+            
+        Returns:
+            List of metadata dictionaries, one per unique_id
+            Each dict contains loader-specific metadata fields
+        """
         pass
 
     def get_frequency_maps(self) -> Optional[Dict[str, Dict[str, int]]]:
@@ -43,8 +56,8 @@ class BaseDataLoader(ABC):
     def explore_dataset(self):
         samples_by_class = defaultdict(list)
         
-        for batch_images, batch_labels in self.get_batch_data(n_samples=100):
-            for img, label in zip(batch_images, batch_labels):
+        for batch_images, batch_labels, batch_unique_ids in self.get_batch_data(n_samples=100):
+            for img, label, unique_id in zip(batch_images, batch_labels, batch_unique_ids):
                 if img is not None and len(samples_by_class[label]) < 3:
                     samples_by_class[label].append((img, label))
             break

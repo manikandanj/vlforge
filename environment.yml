@@ -15,7 +15,9 @@ dependencies:
   - tqdm
   - requests
   - matplotlib
+  - seaborn
   - scikit-learn
+  - h5py
   - pip
   - pip:
     - transformers
