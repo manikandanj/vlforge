@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=butterfly_project_setup
-#SBATCH --partition=hpg-b200
-#SBATCH --gres=gpu:1
-#SBATCH --mem=32gb
-#SBATCH --time=4:00:00
+#SBATCH --partition=hpg-turin
+#SBATCH --gres=gpu:l4:1
+#SBATCH --mem=128gb
+#SBATCH --time=6:00:00
 #SBATCH --output=/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/logs/run_%j.out
 
 
@@ -26,9 +26,6 @@ if [ ! -d "${CONDA_ENV_PATH}" ]; then
     exit 1
 fi
 export PATH=${CONDA_ENV_PATH}/bin:$PATH
-
-# Verify GPU setup
-python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
 
 # Check if metadata file exists and get its size
 METADATA_FILE="/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v250613/metadata/data_meta-nymphalidae_whole_specimen-v250613.csv"

@@ -226,47 +226,95 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
     Returns:
         Tuple of (embeddings_array, metadata_list, generated_filepath)
     """
+    import gc
+    import time
+    
     logger = get_logger()
     logger.info("Generating embeddings in batches...")
     
     all_embeddings = []
     all_metadata = []
     total_processed = 0
+    start_time = time.time()
+    
+    # Estimate total batches for progress tracking
+    estimated_samples = max_samples if max_samples else len(getattr(data_loader, 'df_meta', []))
+    estimated_batches = (estimated_samples + data_loader.batch_size - 1) // data_loader.batch_size
+    logger.info(f"Estimated {estimated_batches} batches to process (~{estimated_samples} samples)")
     
     for batch_idx, (images, labels, unique_ids) in enumerate(data_loader.get_batch_data(n_samples=max_samples)):
         if not images:
             continue
             
-        if batch_idx % 10 == 0:  # Log every 10th batch to reduce clutter
-            logger.info(f"Processing batch {batch_idx + 1}: {len(images)} images")
+        batch_start_time = time.time()
+        
+        # Log progress more frequently for large datasets
+        log_frequency = 1 if estimated_batches <= 100 else (5 if estimated_batches <= 500 else 10)
+        if batch_idx % log_frequency == 0 or batch_idx < 5:  # Always log first 5 batches
+            elapsed_time = time.time() - start_time
+            if batch_idx > 0:
+                avg_time_per_batch = elapsed_time / batch_idx
+                eta_seconds = avg_time_per_batch * (estimated_batches - batch_idx)
+                eta_hours = eta_seconds / 3600
+                logger.info(f"Processing batch {batch_idx + 1}/{estimated_batches}: {len(images)} images "
+                           f"(ETA: {eta_hours:.1f}h, {total_processed} processed so far)")
+            else:
+                logger.info(f"Processing batch {batch_idx + 1}/{estimated_batches}: {len(images)} images")
         
         # Generate embeddings for this batch
-        with torch.no_grad():
-            embeddings = model.get_image_embeddings(images)
-            
-            # Convert to numpy and move to CPU if needed
-            if torch.is_tensor(embeddings):
-                embeddings_np = embeddings.cpu().numpy()
-            else:
-                embeddings_np = embeddings
+        try:
+            with torch.no_grad():
+                embeddings = model.get_image_embeddings(images)
                 
-        all_embeddings.append(embeddings_np)
+                # Convert to numpy and move to CPU if needed
+                if torch.is_tensor(embeddings):
+                    embeddings_np = embeddings.cpu().numpy()
+                else:
+                    embeddings_np = embeddings
+                    
+            all_embeddings.append(embeddings_np)
+            
+            # Get metadata for this batch
+            metadata_batch = data_loader.get_metadata_for_ids(unique_ids)
+            all_metadata.extend(metadata_batch)
+            
+            total_processed += len(images)
+            
+            # Clear GPU cache periodically to prevent memory buildup
+            if batch_idx % 20 == 0 and batch_idx > 0:
+                torch.cuda.empty_cache()
+                gc.collect()
+                
+            # Log timing for first few batches to identify bottlenecks
+            if batch_idx < 5:
+                batch_time = time.time() - batch_start_time
+                logger.info(f"Batch {batch_idx + 1} completed in {batch_time:.2f}s")
         
-        # Get metadata for this batch
-        metadata_batch = data_loader.get_metadata_for_ids(unique_ids)
-        all_metadata.extend(metadata_batch)
-        
-        total_processed += len(images)
+        except Exception as e:
+            logger.error(f"Error processing batch {batch_idx + 1}: {str(e)}")
+            logger.info("Continuing with next batch...")
+            continue
         
         # Check if we've reached max_samples
         if max_samples and total_processed >= max_samples:
+            logger.info(f"Reached max_samples limit ({max_samples}), stopping early")
             break
+        
+        # Memory warning for very large datasets
+        if batch_idx > 0 and batch_idx % 100 == 0:
+            total_embeddings_size_gb = sum(emb.nbytes for emb in all_embeddings) / (1024**3)
+            if total_embeddings_size_gb > 10:  # More than 10GB
+                logger.warning(f"Embeddings using {total_embeddings_size_gb:.2f}GB RAM. "
+                              f"Consider processing in smaller chunks for very large datasets.")
     
     # Combine all embeddings
     if all_embeddings:
+        logger.info("Combining all embeddings...")
         combined_embeddings = np.vstack(all_embeddings)
+        total_time = time.time() - start_time
+        
         logger.info(f"Generated embeddings shape: {combined_embeddings.shape}")
-        logger.info(f"Total processed: {total_processed} images")
+        logger.info(f"Total processed: {total_processed} images in {total_time:.2f}s ({total_processed/total_time:.1f} images/sec)")
         
         # Generate filename if auto_filename is enabled
         generated_filepath = ""
@@ -276,6 +324,10 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
                 dataset_info=data_loader.get_dataset_info(),
                 base_dir=base_storage_dir
             )
+        
+        # Clear intermediate embeddings list to free memory
+        del all_embeddings
+        gc.collect()
         
         return combined_embeddings, all_metadata, generated_filepath
     else:

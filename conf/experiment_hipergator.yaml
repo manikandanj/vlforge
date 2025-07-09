@@ -34,7 +34,7 @@ embeddings:
   custom_filename: null  # Use specific filename (overrides auto_filename if set)
   
   # For embed mode: max samples to process (null for all)
-  max_samples: null
+  max_samples: null  # Process full dataset (230,689 samples)
 
 # Evaluation configuration (only used in eval mode)
 evaluation:
@@ -79,7 +79,7 @@ data:
   metadata_dir: "/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v250613/metadata"
   group: "nymphalidae_whole_specimen-v250613"
   metadata_file: "data_meta-nymphalidae_whole_specimen-v250613.csv"
-  batch_size: 128
+  batch_size: 1024
 
 # Evaluation metrics - only used in eval mode
 # Updated to work with pre-computed embeddings and image-to-image similarity

@@ -10,7 +10,7 @@ dependencies:
   - pillow
   - python=3.10
   - pytorch=2.5.1
-  - pytorch-cuda=12.1
+  - pytorch-cuda=12.4
   - torchvision=0.20.1
   - tqdm
   - requests
