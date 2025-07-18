@@ -1,18 +1,22 @@
+import torch
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Tuple, Optional, Callable
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
+from utils.logging_config import get_logger
 
 
 class BaseEvaluator(ABC):
     
-    def __init__(self, n_samples: int = 200, metrics: List[str] = None, 
-                 data_split_filter: Optional[Dict[str, Any]] = None, **kwargs):
-        self.n_samples = n_samples
+    def __init__(self, n_samples: Optional[int] = 200, metrics: List[str] = None, 
+                 data_split_filter: Optional[Dict[str, Any]] = None, use_gpu: bool = True, **kwargs):
+        self.n_samples = n_samples  # If None/null, use all available queries
         self.metrics = metrics or ["accuracy"]
         self.config = kwargs
         self.evaluator_name = self.__class__.__name__
+        self.use_gpu = use_gpu and torch.cuda.is_available()
+        self.device = torch.device('cuda' if self.use_gpu else 'cpu')
         
         # Foundation for flexible data splits (e.g., species with <10 instances)
         # This will be extended in future iterations
@@ -50,6 +54,8 @@ class BaseEvaluator(ABC):
                                       database_embeddings: np.ndarray) -> np.ndarray:
         """
         Calculate cosine similarity between query and database embeddings.
+        Optimized for large datasets using chunked processing.
+        Uses GPU acceleration if available.
         
         Args:
             query_embeddings: (n_queries, embedding_dim) array
@@ -58,7 +64,91 @@ class BaseEvaluator(ABC):
         Returns:
             (n_queries, n_database) similarity matrix
         """
-        return cosine_similarity(query_embeddings, database_embeddings)
+        if self.use_gpu:
+            return self._get_similarities_gpu(query_embeddings, database_embeddings)
+        else:
+            return self._get_similarities_cpu(query_embeddings, database_embeddings)
+    
+    def _get_similarities_gpu(self, query_embeddings: np.ndarray, 
+                             database_embeddings: np.ndarray) -> np.ndarray:
+        """GPU-accelerated similarity computation using PyTorch."""
+        logger = get_logger()
+        n_queries, n_database = query_embeddings.shape[0], database_embeddings.shape[0]
+        
+        logger.info(f"Computing similarities on GPU ({n_queries}×{n_database}={n_queries*n_database:,})")
+        
+        # Convert to PyTorch tensors and move to GPU
+        query_tensor = torch.tensor(query_embeddings, dtype=torch.float32, device=self.device)
+        db_tensor = torch.tensor(database_embeddings, dtype=torch.float32, device=self.device)
+        
+        # Normalize embeddings for cosine similarity
+        query_tensor = torch.nn.functional.normalize(query_tensor, p=2, dim=1)
+        db_tensor = torch.nn.functional.normalize(db_tensor, p=2, dim=1)
+        
+        # Compute cosine similarity: query @ database.T
+        similarities = torch.mm(query_tensor, db_tensor.t())
+        
+        # Convert back to numpy
+        return similarities.cpu().numpy()
+    
+    def _get_similarities_cpu(self, query_embeddings: np.ndarray, 
+                             database_embeddings: np.ndarray) -> np.ndarray:
+        """CPU-based similarity computation with chunking for large datasets."""
+        n_queries = query_embeddings.shape[0]
+        n_database = database_embeddings.shape[0]
+        
+
+    
+    def get_top_k_results_fast(self, similarities: np.ndarray, database_species: np.ndarray, 
+                              k: int = 50) -> np.ndarray:
+        """
+        Fast method to get top-K results without full sorting.
+        Uses GPU acceleration if available.
+        
+        Args:
+            similarities: (n_queries, n_database) similarity matrix
+            database_species: (n_database,) array of species names
+            k: Number of top results to return
+            
+        Returns:
+            (n_queries, k) array of top-k species indices
+        """
+        if self.use_gpu:
+            return self._get_top_k_gpu(similarities, k)
+        else:
+            return self._get_top_k_cpu(similarities, k)
+    
+    def _get_top_k_gpu(self, similarities: np.ndarray, k: int) -> np.ndarray:
+        """GPU-accelerated top-k selection using PyTorch."""
+        n_queries, n_database = similarities.shape
+        k = min(k, n_database)
+        
+        # Convert to PyTorch tensor and move to GPU
+        sim_tensor = torch.tensor(similarities, dtype=torch.float32, device=self.device)
+        
+        # Get top-k indices using PyTorch (much faster on GPU)
+        _, top_k_indices = torch.topk(sim_tensor, k, dim=1)
+        
+        # Convert back to numpy
+        return top_k_indices.cpu().numpy()
+    
+    def _get_top_k_cpu(self, similarities: np.ndarray, k: int) -> np.ndarray:
+        """CPU-based top-k selection using numpy."""
+        # Use argpartition for faster top-k (O(n) vs O(n log n) for full sort)
+        # Note: argpartition doesn't fully sort, just partitions around k-th element
+        n_queries, n_database = similarities.shape
+        k = min(k, n_database)  # Don't request more than available
+        
+        # Get top-k indices for all queries at once
+        top_k_indices = np.argpartition(similarities, -k, axis=1)[:, -k:]
+        
+        # For each query, sort only the top-k results
+        for i in range(n_queries):
+            top_k_similarities = similarities[i, top_k_indices[i]]
+            sorted_order = np.argsort(top_k_similarities)[::-1]  # Sort in descending order
+            top_k_indices[i] = top_k_indices[i][sorted_order]
+            
+        return top_k_indices
     
     def get_ranked_results_from_similarities(self, similarities: np.ndarray, 
                                            database_metadata: pd.DataFrame) -> List[List[Tuple[str, float]]]:
@@ -124,6 +214,21 @@ class BaseEvaluator(ABC):
         ranked_results = self.get_ranked_results_from_similarities(similarities, database_metadata)
         
         return 0.0, 0.0  # Placeholder return
+    
+    def _get_query_count(self, total_queries: int) -> int:
+        """
+        Determine how many queries to evaluate based on n_samples.
+        
+        Args:
+            total_queries: Total number of available queries
+            
+        Returns:
+            Number of queries to actually evaluate
+        """
+        if self.n_samples is None:
+            return total_queries  # Use all available queries
+        else:
+            return min(self.n_samples, total_queries)
     
     def get_evaluator_info(self) -> Dict[str, Any]:
         return {

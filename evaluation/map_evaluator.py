@@ -91,6 +91,7 @@ class mAPEvaluator(BaseEvaluator):
                                device: str) -> Tuple[float, float]:
         """
         Evaluate using pre-computed embeddings with image-to-image similarity.
+        Optimized for large datasets.
         
         Args:
             query_embeddings: (n_queries, embedding_dim) array
@@ -104,32 +105,34 @@ class mAPEvaluator(BaseEvaluator):
         """
         ap_scores = []
         
-        # Limit number of queries if n_samples is specified
-        n_queries = min(self.n_samples, len(query_embeddings)) if self.n_samples else len(query_embeddings)
+        # Determine number of queries to evaluate (use all from split or limit with n_samples)
+        n_queries = self._get_query_count(len(query_embeddings))
         
-        # Get all species in database for counting relevant items
-        database_species = database_metadata['species'].tolist()
+        # Pre-convert to numpy arrays for faster access
+        query_species = query_metadata['species'].values[:n_queries]
+        database_species = database_metadata['species'].values
         
         # Calculate similarities for all queries at once
         similarities = self.get_image_to_image_similarities(query_embeddings[:n_queries], database_embeddings)
         
+        # For mAP, we need the full ranking, not just top-k, so we'll optimize differently
         query_iterator = range(n_queries)
         if self.show_progress:
             query_iterator = tqdm(query_iterator, desc="mAP Evaluation (Image-to-Image)")
         
         for query_idx in query_iterator:
-            query_species = query_metadata.iloc[query_idx]['species']
+            query_species_name = query_species[query_idx]
             query_similarities = similarities[query_idx]
             
-            # Sort database by similarity descending
+            # Sort database by similarity descending (still needed for mAP)
             sorted_indices = np.argsort(query_similarities)[::-1]
-            ranked_species = [database_metadata.iloc[idx]['species'] for idx in sorted_indices]
+            ranked_species = database_species[sorted_indices]
             
             # Calculate the number of relevant items in the database for this species
-            true_relevant_count = sum(1 for species in database_species if species == query_species)
+            true_relevant_count = np.sum(database_species == query_species_name)
             
             # Calculate Average Precision for this query
-            ap_score = self.average_precision(query_species, ranked_species, true_relevant_count)
+            ap_score = self.average_precision(query_species_name, ranked_species.tolist(), true_relevant_count)
             ap_scores.append(ap_score)
         
         # Calculate mean Average Precision (mAP)

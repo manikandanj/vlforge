@@ -167,6 +167,7 @@ class NDCGEvaluator(BaseEvaluator):
                                device: str) -> Tuple[float, float]:
         """
         Evaluate using pre-computed embeddings with image-to-image similarity.
+        Optimized for large datasets.
         
         Args:
             query_embeddings: (n_queries, embedding_dim) array
@@ -183,31 +184,39 @@ class NDCGEvaluator(BaseEvaluator):
         
         ndcg_scores = {k: [] for k in self.k_values}
         
-        # Limit number of queries if n_samples is specified
-        n_queries = min(self.n_samples, len(query_embeddings)) if self.n_samples else len(query_embeddings)
+        # Determine number of queries to evaluate (use all from split or limit with n_samples)
+        n_queries = self._get_query_count(len(query_embeddings))
+        
+        # Pre-convert to numpy arrays for faster access
+        query_species = query_metadata['species'].values[:n_queries]
+        database_species = database_metadata['species'].values
         
         # Calculate similarities for all queries at once
         similarities = self.get_image_to_image_similarities(query_embeddings[:n_queries], database_embeddings)
+        
+        # Get max k for efficient top-k computation
+        max_k = max(self.k_values) if self.k_values else 50
+        top_k_indices = self.get_top_k_results_fast(similarities, database_species, k=max_k)
         
         query_iterator = range(n_queries)
         if self.show_progress:
             query_iterator = tqdm(query_iterator, desc="nDCG Evaluation (Image-to-Image, Hierarchical)")
         
         for query_idx in query_iterator:
-            query_species = query_metadata.iloc[query_idx]['species']
-            query_similarities = similarities[query_idx]
+            query_species_name = query_species[query_idx]
+            top_k_db_indices = top_k_indices[query_idx]
             
-            # Sort database by similarity descending and create ranked results
-            sorted_indices = np.argsort(query_similarities)[::-1]
-            ranked_results = []
-            for idx in sorted_indices:
-                species = database_metadata.iloc[idx]['species']
-                similarity_score = query_similarities[idx]
-                ranked_results.append((species, similarity_score))
+            # Get species and similarities for top-k results using fast numpy indexing
+            ranked_species = database_species[top_k_db_indices]
+            ranked_similarities = similarities[query_idx, top_k_db_indices]
+            
+            # Create ranked results for nDCG computation
+            ranked_results = [(species, sim_score) for species, sim_score in zip(ranked_species, ranked_similarities)]
             
             # Calculate nDCG for each k value using hierarchical implementation
             for k in self.k_values:
-                ndcg_k = self.ndcg_at_k(query_species, ranked_results, k)
+                k_limited = min(k, len(ranked_results))
+                ndcg_k = self.ndcg_at_k(query_species_name, ranked_results[:k_limited], k_limited)
                 ndcg_scores[k].append(ndcg_k)
         
         # Calculate mean nDCG scores across all queries

@@ -87,6 +87,7 @@ class RecallAtKEvaluator(BaseEvaluator):
                                device: str) -> Tuple[float, float]:
         """
         Evaluate using pre-computed embeddings with image-to-image similarity.
+        Optimized for large datasets.
         
         Args:
             query_embeddings: (n_queries, embedding_dim) array
@@ -100,33 +101,38 @@ class RecallAtKEvaluator(BaseEvaluator):
         """
         recall_scores = {k: [] for k in self.k_values}
         
-        # Limit number of queries if n_samples is specified
-        n_queries = min(self.n_samples, len(query_embeddings)) if self.n_samples else len(query_embeddings)
+        # Determine number of queries to evaluate (use all from split or limit with n_samples)
+        n_queries = self._get_query_count(len(query_embeddings))
         
-        # Get all species in database for counting relevant items
-        database_species = database_metadata['species'].tolist()
+        # Pre-convert to numpy arrays for faster access
+        query_species = query_metadata['species'].values[:n_queries]
+        database_species = database_metadata['species'].values
         
         # Calculate similarities for all queries at once
         similarities = self.get_image_to_image_similarities(query_embeddings[:n_queries], database_embeddings)
+        
+        # Get max k for efficient top-k computation
+        max_k = max(self.k_values) if self.k_values else 50
+        top_k_indices = self.get_top_k_results_fast(similarities, database_species, k=max_k)
         
         query_iterator = range(n_queries)
         if self.show_progress:
             query_iterator = tqdm(query_iterator, desc="Recall@K Evaluation (Image-to-Image)")
         
         for query_idx in query_iterator:
-            query_species = query_metadata.iloc[query_idx]['species']
-            query_similarities = similarities[query_idx]
+            query_species_name = query_species[query_idx]
+            top_k_db_indices = top_k_indices[query_idx]
             
-            # Sort database by similarity descending
-            sorted_indices = np.argsort(query_similarities)[::-1]
-            ranked_species = [database_metadata.iloc[idx]['species'] for idx in sorted_indices]
+            # Get species for top-k results using fast numpy indexing
+            ranked_species = database_species[top_k_db_indices]
             
             # Calculate the number of relevant items in the database for this species
-            true_relevant_count = sum(1 for species in database_species if species == query_species)
+            true_relevant_count = np.sum(database_species == query_species_name)
             
             # Calculate recall@k for each k value
             for k in self.k_values:
-                recall_k = self.recall_at_k(query_species, ranked_species, database_species, k, true_relevant_count)
+                recall_k = self.recall_at_k(query_species_name, ranked_species[:k].tolist(), 
+                                          database_species.tolist(), k, true_relevant_count)
                 recall_scores[k].append(recall_k)
         
         # Calculate average recall scores

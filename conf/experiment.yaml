@@ -6,7 +6,7 @@ hydra:
     chdir: false 
     
 experiment:
-  name: "embed_finetuned_bioclip_best_img2img_20250707"
+  name: "embed_finetuned_bioclip_best_img2img_202507010"
   seed: 42
   device: "cuda"
 
@@ -18,8 +18,8 @@ logging:
 
 # Mode can be "embed" or "eval"
 # embed: Generate and save embeddings to HDF5 file
-# eval: Load embeddings from HDF5 file and run evaluation
-mode: "embed"  # Change to "eval" to run evaluation with pre-computed embeddings
+# eval: Run evaluation (see evaluation.use_precomputed_embeddings for H5 vs model-based)
+mode: "eval"  # Change to "eval" to run evaluation
 
 # Embedding configuration
 embeddings:
@@ -34,14 +34,21 @@ embeddings:
   max_samples: null
 
 # Evaluation configuration (only used in eval mode)
+# Two evaluation approaches available:
+# 1. H5-based (use_precomputed_embeddings: true) - Fast, uses pre-saved embeddings
+# 2. Model-based (use_precomputed_embeddings: false) - Slower, processes images in real-time
 evaluation:
-  # Specific embedding file to load (if null, will use most recent in storage_dir)
-  embedding_file: null  # e.g., "storage/2025-07-07_14-30-52_BioCLIP_butterfly_embeddings.h5"
+  # Evaluation data source configuration
+  use_precomputed_embeddings: true  # true = use H5 file, false = use model + dataloader
   
-  # Query/database split configuration
+  # H5-based evaluation settings (only used when use_precomputed_embeddings: true)
+  # Specific embedding file to load
+  embedding_file: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/v1/2025-07-09_08-03-13_FineTunedBioCLIP_bioclip_butterfly_embeddings_v1.h5"  # e.g., "storage/2025-07-07_14-30-52_BioCLIP_butterfly_embeddings.h5"
+  
+  # Query/database split configuration (for H5-based evaluation)
   split:
-    query_ratio: 0.2  # 20% for queries, 80% for database
-    num_queries: 1    # Number of queries to evaluate (for demo/testing)
+    query_ratio: 0.01  # 1% for queries, 99% for database (affects total query pool size)
+    num_queries: null    # Number of queries to evaluate (for demo/testing). Set to null to use all queries from split
 
 # Comment out base BioCLIP model
 # model:
@@ -53,7 +60,7 @@ evaluation:
 model:
   _target_: "models.finetuned_bioclip.FineTunedBioCLIPModel"
   device: "cuda"
-  checkpoint_path: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/best_img2img_20250707.pt"
+  checkpoint_path: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/v1/best_img2img__v1_20250707.pt"
   base_model_name: "hf-hub:imageomics/bioclip"
 
 # Comment other model and uncomment this one to use OpenAI CLIP
@@ -82,25 +89,32 @@ data:
 
 # Evaluation metrics - only used in eval mode
 # Updated to work with pre-computed embeddings and image-to-image similarity
+# Query limiting: n_samples controls how many queries to evaluate
+# - n_samples: 500 → limit to 500 queries
+# - n_samples: null → use ALL queries from evaluation.split
 evaluators:
   # Binary relevance metrics (species-level matches only)
   - _target_: "evaluation.precision_at_k_evaluator.PrecisionAtKEvaluator"
-    n_samples: 500
+    n_samples: null              # Set to null to use all queries from split
     k_values: [1, 5, 50]
     show_progress: true
+    use_gpu: true                # Enable GPU acceleration with PyTorch
     
   - _target_: "evaluation.recall_at_k_evaluator.RecallAtKEvaluator"
-    n_samples: 500
+    n_samples: null              # Set to null to use all queries from split
     k_values: [1, 5, 50]
     show_progress: true
+    use_gpu: true                # Enable GPU acceleration with PyTorch
     
   - _target_: "evaluation.map_evaluator.mAPEvaluator"
-    n_samples: 500
+    n_samples: null              # Set to null to use all queries from split
     show_progress: true
+    use_gpu: true                # Enable GPU acceleration with PyTorch
     
   # Hierarchical relevance metrics (multi-level taxonomy with exponential gain)
   - _target_: "evaluation.ndcg_evaluator.NDCGEvaluator"
-    n_samples: 500
+    n_samples: null              # Set to null to use all queries from split
     k_values: [1, 5, 50]
     primary_k: 50
     show_progress: true
+    use_gpu: true                # Enable GPU acceleration with PyTorch

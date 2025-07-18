@@ -30,6 +30,7 @@ def find_most_recent_embedding_file(storage_dir: str) -> str:
     return str(most_recent)
 
 
+
 @hydra.main(config_path="conf", config_name="experiment", version_base="1.1")
 def main(cfg: DictConfig) -> None:
 
@@ -97,61 +98,104 @@ def main(cfg: DictConfig) -> None:
         logger.info("Run with mode='eval' to evaluate using these embeddings")
 
     elif cfg.mode == "eval":
-        # EVAL MODE: Load embeddings and run evaluation
-        logger.info("EVALUATION MODE (with pre-computed embeddings)")
+        # EVAL MODE: Choose between H5-based or model-based evaluation
+        use_precomputed = cfg.evaluation.get('use_precomputed_embeddings', True)
         
-        # Determine which embedding file to use
-        if cfg.evaluation.embedding_file:
-            embedding_file_path = cfg.evaluation.embedding_file
-            logger.info(f"Using specified embedding file: {embedding_file_path}")
-        else:
-            embedding_file_path = find_most_recent_embedding_file(cfg.embeddings.storage_dir)
-        
-        # Load embeddings from HDF5
-        storage = EmbeddingStorage(embedding_file_path)
-        embeddings, metadata_df, attributes = storage.load_embeddings()
-        
-        logger.info(f"Loaded embeddings from model: {attributes.get('model_name', 'Unknown')}")
-        logger.info(f"Generated on: {attributes.get('creation_timestamp', 'Unknown')}")
-        
-        # Split into query and database sets
-        logger.info("Splitting data into query and database sets...")
-        np.random.seed(cfg.experiment.seed)
-        n_total = len(embeddings)
-        query_size = max(1, int(n_total * cfg.evaluation.split.query_ratio))
-        
-        # Random split
-        indices = np.random.permutation(n_total)
-        query_indices = indices[:query_size]
-        database_indices = indices[query_size:]
-        
-        query_embeddings = embeddings[query_indices]
-        query_metadata = metadata_df.iloc[query_indices].reset_index(drop=True)
-        database_embeddings = embeddings[database_indices]
-        database_metadata = metadata_df.iloc[database_indices].reset_index(drop=True)
-        
-        logger.info(f"Query set: {len(query_embeddings)} samples")
-        logger.info(f"Database set: {len(database_embeddings)} samples")
-        
-        # Initialize model (needed for evaluator interface compatibility)
-        model = instantiate(cfg.model)
-        data_loader = instantiate(cfg.data)
-        
-        # Run evaluators
-        results = {}
-        for i, ev_cfg in enumerate(cfg.evaluators, 1):
-            evaluator = instantiate(ev_cfg)
-            logger.info(f"Running evaluator: {evaluator.get_evaluator_info()}")
+        if use_precomputed:
+            # H5-BASED EVALUATION: Load embeddings and run evaluation
+            logger.info("EVALUATION MODE (H5-based with pre-computed embeddings)")
             
-            # Pass embeddings and metadata to evaluator
-            loss, metric = evaluator.evaluate_with_embeddings(
-                query_embeddings=query_embeddings,
-                query_metadata=query_metadata,
-                database_embeddings=database_embeddings,
-                database_metadata=database_metadata,
-                device=cfg.experiment.device
-            )
-            results[evaluator.evaluator_name] = {"loss": loss, "metric": metric}
+            # Determine which embedding file to use
+            if cfg.evaluation.embedding_file:
+                embedding_file_path = cfg.evaluation.embedding_file
+                logger.info(f"Using specified embedding file: {embedding_file_path}")
+            else:
+                embedding_file_path = find_most_recent_embedding_file(cfg.embeddings.storage_dir)
+            
+            # Load embeddings from HDF5
+            storage = EmbeddingStorage(embedding_file_path)
+            embeddings, metadata_df, attributes = storage.load_embeddings()
+            
+            logger.info(f"Loaded embeddings from model: {attributes.get('model_name', 'Unknown')}")
+            logger.info(f"Generated on: {attributes.get('creation_timestamp', 'Unknown')}")
+            
+            # Split into query and database sets
+            logger.info("Splitting data into query and database sets...")
+            # Seed already set in deterministic mode, but ensure it's applied for this operation
+            np.random.seed(cfg.experiment.seed)
+            n_total = len(embeddings)
+            query_size = max(1, int(n_total * cfg.evaluation.split.query_ratio))
+            
+            # Random split
+            indices = np.random.permutation(n_total)
+            query_indices = indices[:query_size]
+            database_indices = indices[query_size:]
+            
+            query_embeddings = embeddings[query_indices]
+            query_metadata = metadata_df.iloc[query_indices].reset_index(drop=True)
+            database_embeddings = embeddings[database_indices]
+            database_metadata = metadata_df.iloc[database_indices].reset_index(drop=True)
+            
+            # Apply num_queries limit if specified
+            if hasattr(cfg.evaluation.split, 'num_queries') and cfg.evaluation.split.num_queries:
+                num_queries_limit = cfg.evaluation.split.num_queries
+                if len(query_embeddings) > num_queries_limit:
+                    logger.info(f"Limiting evaluation to {num_queries_limit} queries (from {len(query_embeddings)} available)")
+                    query_embeddings = query_embeddings[:num_queries_limit]
+                    query_metadata = query_metadata.iloc[:num_queries_limit].reset_index(drop=True)
+            
+            logger.info(f"Query set: {len(query_embeddings)} samples")
+            logger.info(f"Database set: {len(database_embeddings)} samples")
+            
+            # NOTE: No need to initialize model/data_loader for H5-based evaluation
+            # Using precomputed embeddings, so model loading is skipped for performance
+            
+            # Run evaluators with pre-computed embeddings
+            results = {}
+            for i, ev_cfg in enumerate(cfg.evaluators, 1):
+                evaluator = instantiate(ev_cfg)
+                logger.info(f"Running evaluator: {evaluator.get_evaluator_info()}")
+                
+                # Pass embeddings and metadata to evaluator
+                loss, metric = evaluator.evaluate_with_embeddings(
+                    query_embeddings=query_embeddings,
+                    query_metadata=query_metadata,
+                    database_embeddings=database_embeddings,
+                    database_metadata=database_metadata,
+                    device=cfg.experiment.device
+                )
+                results[evaluator.evaluator_name] = {"loss": loss, "metric": metric}
+                
+        else:
+            # MODEL-BASED EVALUATION: Process images through model in real-time
+            logger.info("EVALUATION MODE (Model-based with real-time inference)")
+            
+            # Initialize model and data loader
+            logger.info("Initializing model...")
+            model = instantiate(cfg.model)
+            logger.info(f"Model: {model.get_model_info()}")
+
+            logger.info("Initializing data loader...")
+            try:
+                data_loader = instantiate(cfg.data)
+                logger.info(f"Dataset: {data_loader.get_dataset_info()}")
+            except Exception as e:
+                logger.error(f"Failed to initialize data loader: {str(e)}")
+                raise
+            
+            # Run evaluators with model and data loader
+            results = {}
+            for i, ev_cfg in enumerate(cfg.evaluators, 1):
+                evaluator = instantiate(ev_cfg)
+                logger.info(f"Running evaluator: {evaluator.get_evaluator_info()}")
+                
+                # Use traditional model-based evaluation
+                loss, metric = evaluator.evaluate(
+                    model=model,
+                    data_loader=data_loader,
+                    device=cfg.experiment.device
+                )
+                results[evaluator.evaluator_name] = {"loss": loss, "metric": metric}
               
         logger.info("EVALUATION RESULTS:")
         for eval_name, result in results.items():
