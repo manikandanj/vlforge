@@ -115,9 +115,11 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
         """Optimized single image loading with better error handling"""
         try:
             if image_path.exists():
-                img = Image.open(image_path).convert("RGB")
-                # Pre-validate that image can be processed
-                img.load()  # Force loading to catch corrupt images early
+                img = Image.open(image_path)
+                # Convert and optimize in one step
+                if img.mode != 'RGB':
+                    img = img.convert("RGB")
+                # Don't force load here - let PIL be lazy
                 return img
         except Exception as e:
             # Silently handle corrupted images
@@ -134,9 +136,18 @@ class ButterflyDatasetDataLoader(BaseDataLoader):
             # Fallback to sequential loading
             return [self._load_single_image(path) for path in image_paths]
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Use map for efficient parallel loading
-            images = list(executor.map(self._load_single_image, image_paths))
+        # Use larger thread pool for I/O bound operations
+        actual_workers = min(self.max_workers, len(image_paths), 16)
+        with ThreadPoolExecutor(max_workers=actual_workers) as executor:
+            # Use submit for better control over individual futures
+            futures = [executor.submit(self._load_single_image, path) for path in image_paths]
+            images = []
+            for future in futures:
+                try:
+                    img = future.result(timeout=30)  # 30s timeout per image
+                    images.append(img)
+                except Exception:
+                    images.append(None)
         return images
     
     def get_labels(self) -> List[str]:

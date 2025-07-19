@@ -90,8 +90,8 @@ data:
   metadata_dir: "/blue/arthur.porto-biocosmos/data/datasets/nymphalidae_whole_specimen-v250613/metadata"
   group: "nymphalidae_whole_specimen-v250613"
   metadata_file: "data_meta-nymphalidae_whole_specimen-v250613.csv"
-  batch_size: 1024 
-  max_workers: 8  
+  batch_size: 512   # Optimal based on testing - no gain from 1024
+  max_workers: 12   # Increase I/O workers since that may be the bottleneck
 
 # Evaluation metrics - only used in eval mode
 # Updated to work with pre-computed embeddings and image-to-image similarity
