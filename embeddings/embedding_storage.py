@@ -228,9 +228,15 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
     """
     import gc
     import time
+    import torch.multiprocessing as mp
     
     logger = get_logger()
-    logger.info("Generating embeddings in batches...")
+    logger.info("Generating embeddings in batches with optimizations...")
+    
+    # Enable optimized settings for faster processing
+    if torch.cuda.is_available():
+        torch.backends.cudnn.benchmark = True  # Optimize for fixed input sizes
+        torch.cuda.empty_cache()  # Start with clean GPU memory
     
     all_embeddings = []
     all_metadata = []
@@ -241,6 +247,19 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
     estimated_samples = max_samples if max_samples else len(getattr(data_loader, 'df_meta', []))
     estimated_batches = (estimated_samples + data_loader.batch_size - 1) // data_loader.batch_size
     logger.info(f"Estimated {estimated_batches} batches to process (~{estimated_samples} samples)")
+    logger.info(f"Using batch size: {data_loader.batch_size}")
+    
+    # Pre-allocate lists for better memory management
+    if max_samples:
+        # Pre-allocate if we know the size
+        expected_embeddings = max_samples
+    else:
+        expected_embeddings = estimated_samples
+    
+    # Process in larger chunks to reduce memory allocations
+    chunk_size = min(50, estimated_batches)  # Process 50 batches before consolidating
+    chunk_embeddings = []
+    chunk_metadata = []
     
     for batch_idx, (images, labels, unique_ids) in enumerate(data_loader.get_batch_data(n_samples=max_samples)):
         if not images:
@@ -248,47 +267,59 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
             
         batch_start_time = time.time()
         
-        # Log progress more frequently for large datasets
-        log_frequency = 1 if estimated_batches <= 100 else (5 if estimated_batches <= 500 else 10)
-        if batch_idx % log_frequency == 0 or batch_idx < 5:  # Always log first 5 batches
+        # More frequent progress logging for optimization feedback
+        if batch_idx % 10 == 0 or batch_idx < 5:  # Log every 10 batches
             elapsed_time = time.time() - start_time
             if batch_idx > 0:
                 avg_time_per_batch = elapsed_time / batch_idx
+                samples_per_sec = total_processed / elapsed_time
                 eta_seconds = avg_time_per_batch * (estimated_batches - batch_idx)
                 eta_hours = eta_seconds / 3600
-                logger.info(f"Processing batch {batch_idx + 1}/{estimated_batches}: {len(images)} images "
-                           f"(ETA: {eta_hours:.1f}h, {total_processed} processed so far)")
+                logger.info(f"Batch {batch_idx + 1}/{estimated_batches}: {len(images)} images "
+                           f"({samples_per_sec:.1f} samples/s, ETA: {eta_hours:.1f}h)")
             else:
-                logger.info(f"Processing batch {batch_idx + 1}/{estimated_batches}: {len(images)} images")
+                logger.info(f"Starting batch {batch_idx + 1}/{estimated_batches}: {len(images)} images")
         
-        # Generate embeddings for this batch
+        # Generate embeddings for this batch with optimizations
         try:
             with torch.no_grad():
-                embeddings = model.get_image_embeddings(images)
-                
-                # Convert to numpy and move to CPU if needed
-                if torch.is_tensor(embeddings):
-                    embeddings_np = embeddings.cpu().numpy()
+                # Use autocast for potentially faster inference
+                if device == "cuda":
+                    with torch.cuda.amp.autocast():
+                        embeddings = model.get_image_embeddings(images)
                 else:
-                    embeddings_np = embeddings
+                    embeddings = model.get_image_embeddings(images)
+                
+                # Convert to numpy efficiently
+                if torch.is_tensor(embeddings):
+                    embeddings_np = embeddings.cpu().numpy().astype(np.float32)
+                else:
+                    embeddings_np = np.array(embeddings, dtype=np.float32)
                     
-            all_embeddings.append(embeddings_np)
+            chunk_embeddings.append(embeddings_np)
             
             # Get metadata for this batch
             metadata_batch = data_loader.get_metadata_for_ids(unique_ids)
-            all_metadata.extend(metadata_batch)
+            chunk_metadata.extend(metadata_batch)
             
             total_processed += len(images)
             
-            # Clear GPU cache periodically to prevent memory buildup
-            if batch_idx % 20 == 0 and batch_idx > 0:
-                torch.cuda.empty_cache()
-                gc.collect()
-                
-            # Log timing for first few batches to identify bottlenecks
-            if batch_idx < 5:
-                batch_time = time.time() - batch_start_time
-                logger.info(f"Batch {batch_idx + 1} completed in {batch_time:.2f}s")
+            # Periodically consolidate chunks to manage memory
+            if (batch_idx + 1) % chunk_size == 0:
+                if chunk_embeddings:
+                    all_embeddings.append(np.vstack(chunk_embeddings))
+                    all_metadata.extend(chunk_metadata)
+                    chunk_embeddings.clear()
+                    chunk_metadata.clear()
+                    
+                    # Aggressive memory cleanup every chunk
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                    
+                    # Memory usage logging
+                    if torch.cuda.is_available():
+                        memory_used = torch.cuda.memory_allocated() / 1024**3
+                        logger.info(f"GPU memory used: {memory_used:.2f}GB after batch {batch_idx + 1}")
         
         except Exception as e:
             logger.error(f"Error processing batch {batch_idx + 1}: {str(e)}")
@@ -300,21 +331,30 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
             logger.info(f"Reached max_samples limit ({max_samples}), stopping early")
             break
         
-        # Memory warning for very large datasets
-        if batch_idx > 0 and batch_idx % 100 == 0:
-            total_embeddings_size_gb = sum(emb.nbytes for emb in all_embeddings) / (1024**3)
-            if total_embeddings_size_gb > 10:  # More than 10GB
-                logger.warning(f"Embeddings using {total_embeddings_size_gb:.2f}GB RAM. "
-                              f"Consider processing in smaller chunks for very large datasets.")
+        # Performance logging for early batches
+        if batch_idx < 10:
+            batch_time = time.time() - batch_start_time
+            samples_per_sec_batch = len(images) / batch_time
+            logger.info(f"Batch {batch_idx + 1} processed {len(images)} samples in {batch_time:.2f}s ({samples_per_sec_batch:.1f} samples/s)")
     
-    # Combine all embeddings
+    # Process any remaining chunk
+    if chunk_embeddings:
+        all_embeddings.append(np.vstack(chunk_embeddings))
+        all_metadata.extend(chunk_metadata)
+    
+    # Combine all embeddings efficiently
     if all_embeddings:
         logger.info("Combining all embeddings...")
+        combine_start = time.time()
         combined_embeddings = np.vstack(all_embeddings)
+        combine_time = time.time() - combine_start
+        
         total_time = time.time() - start_time
+        final_samples_per_sec = total_processed / total_time
         
         logger.info(f"Generated embeddings shape: {combined_embeddings.shape}")
-        logger.info(f"Total processed: {total_processed} images in {total_time:.2f}s ({total_processed/total_time:.1f} images/sec)")
+        logger.info(f"Total processed: {total_processed} images in {total_time:.2f}s ({final_samples_per_sec:.1f} samples/sec)")
+        logger.info(f"Memory combination took: {combine_time:.2f}s")
         
         # Generate filename if auto_filename is enabled
         generated_filepath = ""
@@ -326,8 +366,10 @@ def generate_embeddings_batched(model, data_loader, device: str, batch_size: int
             )
         
         # Clear intermediate embeddings list to free memory
-        del all_embeddings
+        del all_embeddings, chunk_embeddings
         gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         return combined_embeddings, all_metadata, generated_filepath
     else:
