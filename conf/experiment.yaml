@@ -6,20 +6,18 @@ hydra:
     chdir: false 
     
 experiment:
-  name: "embed_finetuned_bioclip_best_img2img_202507010"
+  name: "Base OpenAI CLIP"
   seed: 42
   device: "cuda"
 
 # Logging configuration
 logging:
-  outputs_dir: "outputs"
+  outputs_dir: null  # null = use Hydra's output directory
   log_filename: null  # null = use "main.log", specify filename for custom name
   auto_filename: false  # true = auto-generate filename with timestamp
 
-# Mode can be "embed" or "eval"
-# embed: Generate and save embeddings to HDF5 file
-# eval: Run evaluation (see evaluation.use_precomputed_embeddings for H5 vs model-based)
-mode: "eval"  # Change to "eval" to run evaluation
+# Mode can be "embed", "eval", or "report"
+mode: "report"  
 
 # Embedding configuration
 embeddings:
@@ -43,32 +41,37 @@ evaluation:
   
   # H5-based evaluation settings (only used when use_precomputed_embeddings: true)
   # Specific embedding file to load
-  embedding_file: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/v1/2025-07-09_08-03-13_FineTunedBioCLIP_bioclip_butterfly_embeddings_v1.h5"  # e.g., "storage/2025-07-07_14-30-52_BioCLIP_butterfly_embeddings.h5"
+  embedding_file: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/v1/2025-07-20_02-57-02_OpenAICLIP_clip-vit-base-patch32_butterfly_embeddings.h5"  # e.g., "storage/2025-07-07_14-30-52_BioCLIP_butterfly_embeddings.h5"
   
   # Query/database split configuration (for H5-based evaluation)
   split:
     query_ratio: 0.01  # 1% for queries, 99% for database (affects total query pool size)
-    num_queries: null    # Number of queries to evaluate (for demo/testing). Set to null to use all queries from split
+    num_queries: 100    # Number of queries to evaluate (for demo/testing). Set to null to use all queries from split
 
-# Comment out base BioCLIP model
+# Base BioCLIP model
 # model:
 #   _target_: "models.bioclip.BioCLIPModel"
 #   device: "cuda"
 #   model_name: "hf-hub:imageomics/bioclip"
 
 # Fine-tuned BioCLIP model configuration
-model:
-  _target_: "models.finetuned_bioclip.FineTunedBioCLIPModel"
-  device: "cuda"
-  checkpoint_path: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/v1/best_img2img__v1_20250707.pt"
-  base_model_name: "hf-hub:imageomics/bioclip"
+# model:
+#   _target_: "models.finetuned_bioclip.FineTunedBioCLIPModel"
+#   device: "cuda"
+#   checkpoint_path: "C:/Mani/learn/Courses/BioCosmos/Butterfly_Project/Artifacts/v1/best_img2img__v1_20250707.pt"
+#   base_model_name: "hf-hub:imageomics/bioclip"
 
-# Comment other model and uncomment this one to use OpenAI CLIP
+# OpenAI CLIP model 
 # model:
 #   _target_: "models.openai_clip.OpenAICLIPModel"
 #   device: "cuda"
 #   model_name: "openai/clip-vit-base-patch32"
 
+# Base BioClip 2 model  
+model:
+  _target_: "models.bioclip.BioCLIPModel"
+  device: "cuda"
+  model_name: "hf-hub:imageomics/bioclip-2"
 
 # data:
 #   _target_: "dataloaders.vlmbio_loader.VLMBioDataLoader"
@@ -118,3 +121,16 @@ evaluators:
     primary_k: 50
     show_progress: true
     use_gpu: true                # Enable GPU acceleration with PyTorch
+
+# Report configuration (only used in report mode)
+# Output will be saved in the current run's Hydra output directory
+report:
+  input_dirs:
+    - "outputs/2025-07-22/08-28-13"  
+    - "outputs/2025-07-22/07-58-51"  
+    - "outputs/2025-07-22/07-57-19"  
+
+
+  title: "Model Performance Comparison"
+  formats: ["png", "pdf"]  
+  metrics: []

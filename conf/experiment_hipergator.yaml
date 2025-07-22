@@ -8,7 +8,7 @@ hydra:
     dir: "/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/logs/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}"
     
 experiment:
-  name: "embed_bioclip_20250718"
+  name: "embed_bioclip2_20250720"
   seed: 42
   device: "cuda"
 
@@ -60,22 +60,30 @@ evaluation:
 #   model_name: "hf-hub:imageomics/bioclip"
 
 # Fine-tuned BioCLIP model configuration
-model:
+  # Use fine-tuned BioCLIP model
+#model:
   # _target_: "models.finetuned_bioclip.FineTunedBioCLIPModel"
   # device: "cuda"
   # checkpoint_path: "/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/checkpoint_files/best_img2img_20250707.pt"
   # base_model_name: "hf-hub:imageomics/bioclip"
 
-# Comment other model and uncomment this one to use OpenAI CLIP
-# model:
-#   _target_: "models.openai_clip.OpenAICLIPModel"
-#   device: "cuda"
-#   model_name: "openai/clip-vit-base-patch32"
+# Use base OpenAI CLIP
+#model:
+  # _target_: "models.openai_clip.OpenAICLIPModel"
+  # device: "cuda"
+  # model_name: "openai/clip-vit-base-patch32"
 
  # Use base BioCLIP model
+ #model:
+  # _target_: "models.bioclip.BioCLIPModel"
+  # device: "cuda"
+  # model_name: "hf-hub:imageomics/bioclip" 
+
+  # Base BioClip 2 model  
+model:
   _target_: "models.bioclip.BioCLIPModel"
   device: "cuda"
-  model_name: "hf-hub:imageomics/bioclip" 
+  model_name: "hf-hub:imageomics/bioclip-2"
 
 # data:
 #   _target_: "dataloaders.vlmbio_loader.VLMBioDataLoader"

@@ -200,7 +200,60 @@ def main(cfg: DictConfig) -> None:
         logger.info("EVALUATION RESULTS:")
         for eval_name, result in results.items():
             logger.info(f"  {eval_name}: {result['metric']:.4f}")
+        
+        # Save results to JSON file
+        import json
+        from datetime import datetime
+        import os
+        from hydra.core.hydra_config import HydraConfig
+        
+        results_data = {
+            "experiment_name": cfg.experiment.name,
+            "timestamp": datetime.now().isoformat(),
+            "model_name": getattr(cfg.model, 'model_name', cfg.model._target_.split('.')[-1]),
+            "dataset_name": getattr(cfg.data, 'group', cfg.data._target_.split('.')[-1]),
+            "device": cfg.experiment.device,
+            "seed": cfg.experiment.seed,
+            "evaluation_config": {
+                "use_precomputed_embeddings": use_precomputed,
+                "embedding_file": cfg.evaluation.get('embedding_file') if use_precomputed else None,
+                "query_ratio": cfg.evaluation.split.query_ratio if use_precomputed else None,
+                "num_queries": getattr(cfg.evaluation.split, 'num_queries', None) if use_precomputed else None
+            },
+            "results": {}
+        }
+        
+        for eval_name, result in results.items():
+            results_data["results"][eval_name] = result['metric']
+        
+        # Save in Hydra output directory
+        hydra_output_dir = HydraConfig.get().runtime.output_dir
+        results_file = os.path.join(hydra_output_dir, "results.json")
+        with open(results_file, 'w') as f:
+            json.dump(results_data, f, indent=2)
+        
+        logger.info(f"Results saved to: {results_file}")
     
+    elif cfg.mode == "report":
+        # REPORT MODE: Generate visualization reports from evaluation outputs
+        logger.info("REPORT MODE: Generating comparison visualizations")
+        
+        # Import report generator
+        from reports.report_generator import ReportGenerator
+        
+        # Initialize report generator
+        report_gen = ReportGenerator(cfg.report)
+        
+        # Generate reports from specified output directories
+        report_files = report_gen.generate_comparison_report()
+        
+        logger.info("REPORT GENERATION COMPLETED:")
+        logger.info(f"  Report directory: {report_files.get('output_dir', 'N/A')}")
+        logger.info(f"  Generated files: {len(report_files.get('files', []))}")
+        
+        for file_type, file_path in report_files.get('files', {}).items():
+            logger.info(f"    {file_type}: {file_path}")
+
     elif cfg.mode == "train":
         logger.warning("Training mode not implemented yet")
     

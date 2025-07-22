@@ -3,7 +3,7 @@
 #SBATCH --partition=hpg-turin
 #SBATCH --gres=gpu:l4:1
 # To use multiple L4s for ~3x speedup, change above to: #SBATCH --gres=gpu:l4:3
-#SBATCH --mem=64gb
+#SBATCH --mem=128gb
 #SBATCH --time=8:00:00
 #SBATCH --output=/blue/arthur.porto-biocosmos/mjeyarajan3.gatech/butterfly_project/logs/run_%j.out
 
